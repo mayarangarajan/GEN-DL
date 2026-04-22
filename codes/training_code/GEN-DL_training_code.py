@@ -1,6 +1,10 @@
 #Python script to train a neural network using Keras library.
 #Edited from published codes by Bury et al. (2021), Deep learning for early warning signals of tipping points, PNAS.
-#Modified by Maya Rangarajan
+#
+# Chakraborty et al. (2024), An early warning indicator trained on stochastic disease-spreading models with different noises
+# https://zenodo.org/records/12537663
+#
+# #Modified by Maya Rangarajan
 
 import os
 import sys
