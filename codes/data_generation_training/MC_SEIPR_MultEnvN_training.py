@@ -28,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from joblib import Parallel, delayed
 
-model = 'SEIPR_MultEnvN_forced'
 
 #  ============ For sequence_Ids and resids_files =============
 count = 2 # batch number for directory

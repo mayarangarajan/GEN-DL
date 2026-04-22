@@ -1,6 +1,14 @@
 # =============================================================================
 # COVID-19 JHU → Null / Transcritical Residuals (2 years) — robust parallel version
 # =============================================================================
+#
+# Written by Maya Rangarajan
+#
+# Creates null and transcritical outbreak time series from JHU source
+# Retrieves data from website + downloads it locally + processes to generate residual series
+# Runs on multi-core processor
+#  Adjust N_WORKERS based on number of CPUs available
+#
 
 import pandas as pd
 import numpy as np
@@ -105,144 +113,6 @@ def find_transcritical_windows(r_means, cases_ts, min_len=56, max_len=180):
 
     return windows
 
-'''
-def get_transcritical_null_series(df_state, min_length=MIN_TRANS_LEN, null_offset=NULL_OFFSET):
-    """
-    Given a state DataFrame with 'Date' and 'Daily', compute transcritical
-    and null series based on Re estimates.
-    """
-
-    df_state_daily = df_state.groupby('Date')['Daily'].sum().reset_index()
-    df_state_daily['FIPS'] = df_state['FIPS'].iloc[0]
-
-    if df_state_daily['FIPS'].iloc[0] == 1001:   # Only print for this county
-        print(f"\nDEBUG [FIPS 1001]: daily counts head:")
-        print(df_state_daily.head(15))
-        print(f"Total cases: {df_state_daily['Daily'].sum()}")
-        print(f"Days with cases > 0: {(df_state_daily['Daily'] > 0).sum()}")
-
-    cases_values = df_state_daily['Daily'].values
-
-    if df_state['FIPS'].iloc[0] == 1001:
-        print(f"DEBUG: FIPS={df_state['FIPS'].iloc[0]}, total_cases={cases_values.sum()}, nonzero_days={(cases_values > 0).sum()}")
-
-    if cases_values.sum() < MIN_TOTAL_CASES:
-        return [], []
-    if df_state['FIPS'].iloc[0] == 1001:
-        print("DEBUG: daily counts head:")
-        print(df_state_daily.head(20))
-        print(f"Total cases = {cases_values.sum()}")
-        print(f"Non-zero days = {(cases_values > 0).sum()}")
-
-    nonzero_days = (cases_values > 0).sum()
-    # print(f"FIPS {df_state_daily['FIPS'].iloc[0]}: nonzero days = {nonzero_days}")
-    
-
-    cases_ts = pd.Series(cases_values, index=df_state_daily['Date'])
-    
-    # --- NEW: Check for sufficient non-zero data points ---
-    # epyestim often fails with data that is mostly zeros.
-    # This prevents the 'deconvolution has nan' error that causes the malformed output.
-    if (cases_ts > 0).sum() < 30: # Require at least 21 days with cases
-        if df_state['FIPS'].iloc[0] == 1001:
-            print("DEBUG: insufficient non-zero days, skipping R estimation")
-        state_name = df_state['FIPS'].iloc[0] if not df_state.empty else 'Unknown'
-        # print(f"Warning: Insufficient non-zero case data for FIPS {fips_val}. Skipping R estimation.")
-        return [], []
-
-    cases_smoothed = cases_ts.rolling(window=7, center=True, min_periods=1).mean().fillna(0) + 1e-6 
-    r_estimate = pd.DataFrame() 
-
-    try:
-        r_estimate = r_covid(
-            cases_ts,
-            r_window_size=14
-        )
-        if df_state_daily['FIPS'].iloc[0] == 1001:
-            print(f"DEBUG [FIPS 1001]: r_estimate head:")
-            print(r_estimate.head(10))
-
-    except Exception as e:
-        # print(f"Error computing Re for FIPS {df_state}: {e}")
-        return [], []
-    
-    # --- Consolidated and robust check (removed duplicates) ---
-    if r_estimate.empty:
-        return [], []
-
-# Check for R mean values (handle different column formats)
-    if isinstance(r_estimate.columns, pd.MultiIndex):
-        # MultiIndex format: ('R', 'Mean(R)')
-        if ('R', 'Mean(R)') in r_estimate.columns:
-            r_means = r_estimate['R']['Mean(R)']
-        else:
-            return [], []
-    else:
-        # Flat column format: 'R_mean'
-        if 'R_mean' in r_estimate.columns:
-            r_means = r_estimate['R_mean']
-        elif 'R' in r_estimate.columns:
-            r_means = r_estimate['R']
-        else:
-            if df_state['FIPS'].iloc[0] == 1001:
-                print(f"DEBUG: Unexpected column format: {r_estimate.columns.tolist()}")
-            return [], []
-
-    # Determine the positional index where R >= 1 for the first time
-    r_ge1 = r_means >= 1
-
-    if r_ge1.any():
-        first_ge1_date = r_means[r_ge1].index[0]
-        first_ge1_index = np.argmax(r_ge1)
-    else:
-        first_ge1_date = None
-        first_ge1_index = len(r_means)  # or a safe default
-
-    if df_state['FIPS'].iloc[0] == 1001:
-        print(f"DEBUG [FIPS 1001]: first_ge1_index (position) = {first_ge1_index}")
-        print(f"DEBUG [FIPS 1001]: first_ge1_date = {first_ge1_date}")
-        print(f"DEBUG [FIPS 1001]: length of r_means = {len(r_means)}")
-        print(f"DEBUG [FIPS 1001]: cases_ts date range: {cases_ts.index[0]} to {cases_ts.index[-1]}")
-
-
-# Determine transcritical series using DATE, not position
-    if first_ge1_date is None:
-        # R never reaches 1
-        transcritical_series = cases_ts
-    elif first_ge1_date not in cases_ts.index:
-        # first_ge1_date is beyond our cases data - shouldn't happen but be safe
-        transcritical_series = cases_ts
-    else:
-        # Take all cases BEFORE the date when R >= 1
-        transcritical_series = cases_ts.loc[cases_ts.index < first_ge1_date]
-        
-        if df_state['FIPS'].iloc[0] == 1001:
-            print(f"DEBUG [FIPS 1001]: Transcritical cutoff date: {first_ge1_date}")
-            print(f"DEBUG [FIPS 1001]: Transcritical series length: {len(transcritical_series)}")
-    
-        # Enforce minimum length
-        if len(transcritical_series) < MIN_TRANS_LEN:
-            # Extend to MIN_TRANS_LEN from start of cases_ts
-            transcritical_series = cases_ts.iloc[:min(MIN_TRANS_LEN, len(cases_ts))]
-            
-            if df_state['FIPS'].iloc[0] == 1001:
-                print(f"DEBUG [FIPS 1001]: Extended to MIN_TRANS_LEN: {len(transcritical_series)}")
-
-    if df_state['FIPS'].iloc[0] == 1001:
-        print(f"DEBUG [FIPS 1001]: Final transcritical length: {len(transcritical_series)}")
-        print(f"DEBUG [FIPS 1001]: Date range: {transcritical_series.index[0]} to {transcritical_series.index[-1]}")
-        print(f"DEBUG [FIPS 1001]: Total cases in transcritical: {transcritical_series.sum()}")
-        print(f"DEBUG [FIPS 1001]: Non-zero days: {(transcritical_series > 0).sum()}")
-
-    # Null series logic
-
-    null_series = pd.Series([])
-    if len(transcritical_series) > NULL_OFFSET:
-        null_series = transcritical_series.iloc[:-NULL_OFFSET]
-
-
-    return transcritical_series, null_series
-'''
 def compute_residuals_and_ews(window):
     """
     Compute residuals, smoothed series, lag-1 autocorrelation, and variance
@@ -267,7 +137,6 @@ def compute_residuals_and_ews(window):
     ews_df   = ews_dic.ews
     # raw_I = tem_series.values
 
-    # --- ROBUST EXTRACTION ---
     # Check if columns exist; if not, fill with NaN to maintain array length
     def get_column_safe(df, col_name):
         if col_name in df.columns:
@@ -283,6 +152,11 @@ def compute_residuals_and_ews(window):
     }
 
 def process_county_for_transcritical_windows(args):
+    """
+    Extracts transcritical windows from raw data. Uses epieyestim package
+    For each TC series, truncate last 28 days to obtain null sequence
+    """
+
     fips, group = args
 
     # print(f"Starting FIPS {fips}...")
@@ -290,6 +164,7 @@ def process_county_for_transcritical_windows(args):
     last_forced_start_idx = -np.inf
     total_cases = group['Daily'].sum()
     days_with_cases = (group['Daily'] > 0).sum()
+    # drop time series with too few cases or sparse number of cases
     if total_cases < MIN_TOTAL_CASES or days_with_cases < 30:
         return [], EXIT_TOO_FEW_CASES
 
@@ -308,15 +183,10 @@ def process_county_for_transcritical_windows(args):
 
     except Exception:
         return [], EXIT_R_FAIL # was return[]
-    # print(f"R estimated for FIPS {fips}")
-    # t_start = time.perf_counter()
     windows = find_transcritical_windows(r_means, cases_ts)
-    # t_windows = time.perf_counter()
-    # print(f"FIPS {fips}: find_transcritical_windows took {t_windows - t_start:.2f}s")
     if len(windows) == 0:
         return [], EXIT_NO_WINDOWS # was return[]
     
-    # print(f"transcrticial windows cmopleted for FIP {fips}")
     segments = []
 
     NULL_OFFSET_DAYS = 28  # 4 weeks
@@ -334,8 +204,7 @@ def process_county_for_transcritical_windows(args):
             null_window = segment_series.iloc[:-NULL_OFFSET_DAYS]
             data_null = compute_residuals_and_ews(null_window)
 
-            # THE FIX: Quality check both. If either is "bad", discard BOTH.
-            # Checking residuals ensures the Lowess smoothing didn't result in flat-lines
+            # Checking residuals to ensure the Lowess smoothing didn't result in flat-lines
             if too_many_zeros(data_tc['residuals'], fips=fips) or too_many_zeros(data_null['residuals'], fips=fips):
                 continue 
 
@@ -374,7 +243,7 @@ def process_county_for_transcritical_windows(args):
 if __name__ == "__main__":
 
     # ------------------------------------------------------------------
-    # HARD CHECK: ensure all required output directories exist
+    # Ensure all required output directories exist
     # ------------------------------------------------------------------
     required_dirs = [
         OUTPUT_DIR,
@@ -415,35 +284,10 @@ if __name__ == "__main__":
     ews_forced_rows = []   # label = 1
     ews_null_rows = []
 
-    NY_FIPS = [
-    36001, 36003, 36005, 36007, 36009, 36011, 36013, 36015, 36017, 36019,
-    36021, 36023, 36025, 36027, 36029, 36031, 36033, 36035, 36037, 36039,
-    36041, 36043, 36045, 36047, 36049, 36051, 36053, 36055, 36057, 36059,
-    36061, 36063, 36065, 36067, 36069, 36071, 36073, 36075, 36077, 36079,
-    36081, 36083, 36085, 36087, 36089, 36091, 36093, 36095, 36097, 36099,
-    36101, 36103, 36105, 36107, 36109, 36111, 36113, 36115, 36117, 36119,
-    36121, 36123, 36125, 36127, 36129, 36131, 36133, 36135, 36137, 36139
-    ]
-
-    CA_FIPS = [
-        6001, 6003, 6005, 6007, 6009, 6011, 6013, 6015, 6017, 6019,
-        6021, 6023, 6025, 6027, 6029, 6031, 6033, 6035, 6037, 6039,
-        6041, 6043, 6045, 6047, 6049, 6051, 6053, 6055, 6057, 6059,
-        6061, 6063, 6065, 6067, 6069, 6071, 6073, 6075, 6077, 6079,
-        6081, 6083, 6085, 6087, 6089, 6091, 6093, 6095, 6097, 6099,
-        6101, 6103, 6105, 6107, 6109, 6111, 6113, 6115, 6117, 6119
-    ]
-
-    state_fips = NY_FIPS + CA_FIPS
 
     # Filter county groups
     county_groups = [(fips, group) for fips, group in df_long.groupby('FIPS') 
                      if pd.notna(fips)]
-    #                if pd.notna(fips) and int(fips) in state_fips]
-
-    # print(f"Processing {len(county_groups)} counties (NY + CA)")
-    
-    # county_groups = [(fips, group) for fips, group in df_long.groupby('FIPS') if pd.notna(fips)]
 
     exit_counts = {}
 
@@ -479,26 +323,6 @@ if __name__ == "__main__":
         seg['sequence_ID'] = id_mapping[key]
 
     # 2. Assign Global Sequential Integer IDs
-    '''
-    id_mapping = {}
-    next_seq_id = 1
-
-    for seg in all_segments:
-        # Use the pair_id (UUID) or (fips, local_id) to map to a simple integer
-        # If you used the updated worker I suggested, use seg['pair_id'] here
-        pid = seg['pair_id'] 
-        
-        if pid not in id_mapping:
-            id_mapping[pid] = next_seq_id
-            next_seq_id += 1
-        
-        seg['sequence_ID'] = id_mapping[pid]
-
-    # 3. Validation Clean-up (Alignment Bug Fix)
-    # Since the new worker logic only returns segments if BOTH pass too_many_zeros,
-    # we no longer need to find 'bad_ids' here. We can proceed directly to saving.
-    print(f"Assigned sequential IDs 1 through {next_seq_id - 1}")
-    '''
     labels = []
     id_to_fips = []
 

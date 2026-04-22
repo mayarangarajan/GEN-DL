@@ -29,7 +29,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from joblib import Parallel, delayed
 
-model = 'SEIPR_MultEnvN_forced'
 
 #  ============ For sequence_Ids and resids_files =============
 count = 1 # batch number for directory
@@ -712,7 +711,7 @@ gc.collect()
 # set up a list to store output dataframes from ews_compute- we will concatenate them at the end
 appended_ews = []
 
-# loop through realisation number
+# loop through realization number
 print('\nBegin EWS computation\n')
 num_threads = 12  # adjust to available CPU cores
 appended_ews = Parallel(n_jobs=num_threads)(
