@@ -1,0 +1,1 @@
+Simulation 2 macro f1: 0.998000. macro avg precision 0.998000.  macro avg recall 0.998000. Kernel size 12.  Filters 50.  Batch size 1000.  Epochs 1500.  seq_len 500.  Set size 100000.  Mem_cells 50. Mem_cells2 10. dropout 0.100000. CNN layers 1, LSTM layers 1, pool_size_param 2, learning_rate_param 0.000500.  initializer lecun_normal 

@@ -1,0 +1,14 @@
+================================================================================
+SILHOUETTE RESULTS
+================================================================================
+
+Global regime separation: 0.0661
+Mean regime (ALL): 0.1199
+Global disease separation: 0.1168
+
+Mean pairwise disease (ALL): 0.3428
+Mean pairwise disease (TC): 0.4118
+
+RATIOS
+ALL: 0.3498
+TC : 0.2912

@@ -1,0 +1,9 @@
+Simulation: 2
+Macro F1: 0.9970
+Macro Precision: 0.9970
+Macro Recall: 0.9970
+Kernel Size: 12, Filters: 50, Batch Size: 1000, Epochs: 1500
+Sequence Length: 100, Set Size: 100000
+Mem Cells: 50, Mem Cells2: 10, Dropout: 0.10
+CNN Layers: 1, LSTM Layers: 1, Pool Size: 2, Learning Rate: 0.000500
+Initializer: lecun_normal

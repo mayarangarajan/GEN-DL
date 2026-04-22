@@ -1,0 +1,612 @@
+# =============================================================================
+# COVID-19 JHU → Null / Transcritical Residuals (2 years) — robust parallel version
+# =============================================================================
+
+import pandas as pd
+import numpy as np
+import os
+from statsmodels.nonparametric.smoothers_lowess import lowess
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import zipfile
+import warnings
+from epyestim.covid19 import r_covid
+import epyestim.estimate_r as er
+from tqdm import tqdm 
+import uuid 
+import ewstools
+import time
+import csv
+
+warnings.filterwarnings("ignore")
+
+# -------------------------- CONFIG -----------------------------------------
+URL = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv"
+MIN_TOTAL_CASES = 10          # Skip very small counties
+NULL_OFFSET = 28               # Days to truncate for null series
+MIN_TRANS_LEN = 56             # Minimum length of transcritical series
+OUTPUT_DIR = "real_data_covid2y_parallel"
+N_WORKERS = 5                 # Number of parallel workers
+MAX_ZERO_FRACTION = 0.3   
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(os.path.join(OUTPUT_DIR, "resids"), exist_ok=True)
+os.makedirs(os.path.join(OUTPUT_DIR, "timeseries"), exist_ok=True)  # NEW: detailed time series
+os.makedirs(os.path.join(OUTPUT_DIR, "output_labels"), exist_ok=True)
+os.makedirs(os.path.join(OUTPUT_DIR, "output_groups"), exist_ok=True)
+
+# -------------------------- FUNCTIONS --------------------------------------
+
+EXIT_OK = "ok"
+EXIT_TOO_FEW_CASES = "too_few_cases"
+EXIT_R_FAIL = "r_failed"
+EXIT_NO_WINDOWS = "no_transcritical_windows"
+EXIT_WINDOWS_TOO_SHORT = "windows_too_short"
+EXIT_TOO_MANY_ZEROS = "too_many_zeros"
+EXIT_EXCEPTION = "exception"
+
+ZERO_LOG_FILE = os.path.join(OUTPUT_DIR, "too_many_zeros_log.csv")
+with open(ZERO_LOG_FILE, 'w', newline='') as f:
+    writer = csv.DictWriter(f, fieldnames=['fips', 'local_pair_id', 'zero_frac'])
+    writer.writeheader()
+
+
+def get_column_safe(df, col_name):
+    if col_name in df.columns:
+        return df[col_name].values
+    return np.full(len(df), np.nan)  # fill with NaN if missing
+
+def too_many_zeros(x, tol=1e-8, max_frac=MAX_ZERO_FRACTION, fips=None):
+    x = np.asarray(x)
+    zero_frac = np.mean(np.abs(x) < tol)
+    if zero_frac >= max_frac:
+        with open(ZERO_LOG_FILE, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([fips, zero_frac])
+    return zero_frac >= max_frac
+
+
+def find_transcritical_windows(r_means, cases_ts, min_len=56, max_len=180):
+    """
+    Extract transcritical segments between downward and upward crossings of R=1.
+
+    Upward crossing: R goes from <1 to >=1 (end of segment)
+    Downward crossing: R goes from >=1 to <1 (start of segment)
+    """
+
+    windows = []
+
+    # Identify upward and downward crossings
+    upward_crossings = (r_means.shift(1) < 1) & (r_means >= 1)
+    downward_crossings = (r_means.shift(1) >= 1) & (r_means < 1)
+
+    upward_dates = r_means.index[upward_crossings]
+    downward_dates = r_means.index[downward_crossings]
+
+    # For each upward crossing, find the closest previous downward crossing
+    for up_date in upward_dates:
+        # Get all downward crossings before the upward crossing
+        prior_downs = downward_dates[downward_dates < up_date]
+
+        if len(prior_downs) == 0:
+            # No previous downward crossing; optionally skip or use start of series
+            start_date = cases_ts.index[0]
+        else:
+            start_date = prior_downs[-1]  # Last downward crossing before up_date
+
+        # Extract segment between start_date (inclusive) and up_date (exclusive)
+        segment = cases_ts.loc[(cases_ts.index >= start_date) & (cases_ts.index <= up_date)]
+
+        # Enforce max_len by trimming from the start if needed
+        if len(segment) > max_len:
+            segment = segment.iloc[-max_len:]
+
+        # Enforce minimum length
+        if len(segment) >= min_len:
+            windows.append((start_date, up_date, segment))
+
+    return windows
+
+'''
+def get_transcritical_null_series(df_state, min_length=MIN_TRANS_LEN, null_offset=NULL_OFFSET):
+    """
+    Given a state DataFrame with 'Date' and 'Daily', compute transcritical
+    and null series based on Re estimates.
+    """
+
+    df_state_daily = df_state.groupby('Date')['Daily'].sum().reset_index()
+    df_state_daily['FIPS'] = df_state['FIPS'].iloc[0]
+
+    if df_state_daily['FIPS'].iloc[0] == 1001:   # Only print for this county
+        print(f"\nDEBUG [FIPS 1001]: daily counts head:")
+        print(df_state_daily.head(15))
+        print(f"Total cases: {df_state_daily['Daily'].sum()}")
+        print(f"Days with cases > 0: {(df_state_daily['Daily'] > 0).sum()}")
+
+    cases_values = df_state_daily['Daily'].values
+
+    if df_state['FIPS'].iloc[0] == 1001:
+        print(f"DEBUG: FIPS={df_state['FIPS'].iloc[0]}, total_cases={cases_values.sum()}, nonzero_days={(cases_values > 0).sum()}")
+
+    if cases_values.sum() < MIN_TOTAL_CASES:
+        return [], []
+    if df_state['FIPS'].iloc[0] == 1001:
+        print("DEBUG: daily counts head:")
+        print(df_state_daily.head(20))
+        print(f"Total cases = {cases_values.sum()}")
+        print(f"Non-zero days = {(cases_values > 0).sum()}")
+
+    nonzero_days = (cases_values > 0).sum()
+    # print(f"FIPS {df_state_daily['FIPS'].iloc[0]}: nonzero days = {nonzero_days}")
+    
+
+    cases_ts = pd.Series(cases_values, index=df_state_daily['Date'])
+    
+    # --- NEW: Check for sufficient non-zero data points ---
+    # epyestim often fails with data that is mostly zeros.
+    # This prevents the 'deconvolution has nan' error that causes the malformed output.
+    if (cases_ts > 0).sum() < 30: # Require at least 21 days with cases
+        if df_state['FIPS'].iloc[0] == 1001:
+            print("DEBUG: insufficient non-zero days, skipping R estimation")
+        state_name = df_state['FIPS'].iloc[0] if not df_state.empty else 'Unknown'
+        # print(f"Warning: Insufficient non-zero case data for FIPS {fips_val}. Skipping R estimation.")
+        return [], []
+
+    cases_smoothed = cases_ts.rolling(window=7, center=True, min_periods=1).mean().fillna(0) + 1e-6 
+    r_estimate = pd.DataFrame() 
+
+    try:
+        r_estimate = r_covid(
+            cases_ts,
+            r_window_size=14
+        )
+        if df_state_daily['FIPS'].iloc[0] == 1001:
+            print(f"DEBUG [FIPS 1001]: r_estimate head:")
+            print(r_estimate.head(10))
+
+    except Exception as e:
+        # print(f"Error computing Re for FIPS {df_state}: {e}")
+        return [], []
+    
+    # --- Consolidated and robust check (removed duplicates) ---
+    if r_estimate.empty:
+        return [], []
+
+# Check for R mean values (handle different column formats)
+    if isinstance(r_estimate.columns, pd.MultiIndex):
+        # MultiIndex format: ('R', 'Mean(R)')
+        if ('R', 'Mean(R)') in r_estimate.columns:
+            r_means = r_estimate['R']['Mean(R)']
+        else:
+            return [], []
+    else:
+        # Flat column format: 'R_mean'
+        if 'R_mean' in r_estimate.columns:
+            r_means = r_estimate['R_mean']
+        elif 'R' in r_estimate.columns:
+            r_means = r_estimate['R']
+        else:
+            if df_state['FIPS'].iloc[0] == 1001:
+                print(f"DEBUG: Unexpected column format: {r_estimate.columns.tolist()}")
+            return [], []
+
+    # Determine the positional index where R >= 1 for the first time
+    r_ge1 = r_means >= 1
+
+    if r_ge1.any():
+        first_ge1_date = r_means[r_ge1].index[0]
+        first_ge1_index = np.argmax(r_ge1)
+    else:
+        first_ge1_date = None
+        first_ge1_index = len(r_means)  # or a safe default
+
+    if df_state['FIPS'].iloc[0] == 1001:
+        print(f"DEBUG [FIPS 1001]: first_ge1_index (position) = {first_ge1_index}")
+        print(f"DEBUG [FIPS 1001]: first_ge1_date = {first_ge1_date}")
+        print(f"DEBUG [FIPS 1001]: length of r_means = {len(r_means)}")
+        print(f"DEBUG [FIPS 1001]: cases_ts date range: {cases_ts.index[0]} to {cases_ts.index[-1]}")
+
+
+# Determine transcritical series using DATE, not position
+    if first_ge1_date is None:
+        # R never reaches 1
+        transcritical_series = cases_ts
+    elif first_ge1_date not in cases_ts.index:
+        # first_ge1_date is beyond our cases data - shouldn't happen but be safe
+        transcritical_series = cases_ts
+    else:
+        # Take all cases BEFORE the date when R >= 1
+        transcritical_series = cases_ts.loc[cases_ts.index < first_ge1_date]
+        
+        if df_state['FIPS'].iloc[0] == 1001:
+            print(f"DEBUG [FIPS 1001]: Transcritical cutoff date: {first_ge1_date}")
+            print(f"DEBUG [FIPS 1001]: Transcritical series length: {len(transcritical_series)}")
+    
+        # Enforce minimum length
+        if len(transcritical_series) < MIN_TRANS_LEN:
+            # Extend to MIN_TRANS_LEN from start of cases_ts
+            transcritical_series = cases_ts.iloc[:min(MIN_TRANS_LEN, len(cases_ts))]
+            
+            if df_state['FIPS'].iloc[0] == 1001:
+                print(f"DEBUG [FIPS 1001]: Extended to MIN_TRANS_LEN: {len(transcritical_series)}")
+
+    if df_state['FIPS'].iloc[0] == 1001:
+        print(f"DEBUG [FIPS 1001]: Final transcritical length: {len(transcritical_series)}")
+        print(f"DEBUG [FIPS 1001]: Date range: {transcritical_series.index[0]} to {transcritical_series.index[-1]}")
+        print(f"DEBUG [FIPS 1001]: Total cases in transcritical: {transcritical_series.sum()}")
+        print(f"DEBUG [FIPS 1001]: Non-zero days: {(transcritical_series > 0).sum()}")
+
+    # Null series logic
+
+    null_series = pd.Series([])
+    if len(transcritical_series) > NULL_OFFSET:
+        null_series = transcritical_series.iloc[:-NULL_OFFSET]
+
+
+    return transcritical_series, null_series
+'''
+def compute_residuals_and_ews(window):
+    """
+    Compute residuals, smoothed series, lag-1 autocorrelation, and variance
+    using ewstools, matching the reference method.
+    """
+    var_name = 'I'
+    rw = 0.25   # rolling window fraction
+    span = 0.2  # lowess span
+    lag = 1
+
+    # Create ewstools TimeSeries object
+    tem_series = window
+    ews_dic = ewstools.core.TimeSeries(tem_series, transition=None)
+    
+    ews_dic.detrend(method='Lowess', span=span)
+    
+    ews_dic.compute_auto(rolling_window=rw, lag=lag)
+    ews_dic.compute_var(rolling_window=rw)
+    
+    # Extract results
+    state_df = ews_dic.state
+    ews_df   = ews_dic.ews
+    # raw_I = tem_series.values
+
+    # --- ROBUST EXTRACTION ---
+    # Check if columns exist; if not, fill with NaN to maintain array length
+    def get_column_safe(df, col_name):
+        if col_name in df.columns:
+            return df[col_name].values
+        return np.full(len(df), np.nan)
+    
+    return {
+        'raw_I': state_df['state'].values,
+        'smoothed': state_df['smoothing'].values,
+        'residuals': state_df['residuals'].values,
+        'ac1': ews_df['ac1'].values,
+        'variance': get_column_safe(ews_df, 'variance')
+    }
+
+def process_county_for_transcritical_windows(args):
+    fips, group = args
+
+    # print(f"Starting FIPS {fips}...")
+
+    last_forced_start_idx = -np.inf
+    total_cases = group['Daily'].sum()
+    days_with_cases = (group['Daily'] > 0).sum()
+    if total_cases < MIN_TOTAL_CASES or days_with_cases < 30:
+        return [], EXIT_TOO_FEW_CASES
+
+    df_daily = group.groupby('Date')['Daily'].sum().reset_index()
+    cases_ts = pd.Series(df_daily['Daily'].values, index=df_daily['Date'])
+
+    try:
+        r_estimate = r_covid(cases_ts, r_window_size=14)
+        if r_estimate.empty:
+            return [], EXIT_R_FAIL # was return[]
+
+        if isinstance(r_estimate.columns, pd.MultiIndex):
+            r_means = r_estimate['R']['Mean(R)'].fillna(0)
+        else:
+            r_means = r_estimate['R_mean'].fillna(0)
+
+    except Exception:
+        return [], EXIT_R_FAIL # was return[]
+    # print(f"R estimated for FIPS {fips}")
+    # t_start = time.perf_counter()
+    windows = find_transcritical_windows(r_means, cases_ts)
+    # t_windows = time.perf_counter()
+    # print(f"FIPS {fips}: find_transcritical_windows took {t_windows - t_start:.2f}s")
+    if len(windows) == 0:
+        return [], EXIT_NO_WINDOWS # was return[]
+    
+    # print(f"transcrticial windows cmopleted for FIP {fips}")
+    segments = []
+
+    NULL_OFFSET_DAYS = 28  # 4 weeks
+    window_counter = 1
+
+    for (start_date, end_date, segment_series) in windows:
+        if len(segment_series) < MIN_TRANS_LEN or len(segment_series) <= NULL_OFFSET_DAYS:
+            continue
+        
+        try:
+            # 1. Compute BOTH first
+            data_tc = compute_residuals_and_ews(segment_series)
+            
+            # Calculate Null (Label 0)
+            null_window = segment_series.iloc[:-NULL_OFFSET_DAYS]
+            data_null = compute_residuals_and_ews(null_window)
+
+            # THE FIX: Quality check both. If either is "bad", discard BOTH.
+            # Checking residuals ensures the Lowess smoothing didn't result in flat-lines
+            if too_many_zeros(data_tc['residuals'], fips=fips) or too_many_zeros(data_null['residuals'], fips=fips):
+                continue 
+
+            # Local ID used to pair them later in the main thread
+            local_id = window_counter
+            window_counter += 1
+            
+            # Append as a pair
+            pair = [
+                {
+                    'residuals': data_tc['residuals'], 'raw_I': data_tc['raw_I'],
+                    'smoothed': data_tc['smoothed'], 'ac1': data_tc['ac1'],
+                    'variance': data_tc['variance'], 'label': 1, 'fips': fips,
+                    'start_date': str(segment_series.index[0])[:10],
+                    'end_date': str(segment_series.index[-1])[:10],
+                    'local_pair_id': local_id
+                },
+                {
+                    'residuals': data_null['residuals'], 'raw_I': data_null['raw_I'],
+                    'smoothed': data_null['smoothed'], 'ac1': data_null['ac1'],
+                    'variance': data_null['variance'], 'label': 0, 'fips': fips,
+                    'start_date': str(null_window.index[0])[:10],
+                    'end_date': str(null_window.index[-1])[:10],
+                    'local_pair_id': local_id
+                }
+            ]
+            segments.extend(pair)
+        except Exception as e:
+            print(f"[ERROR] FIPS {fips}: {e}")
+            continue
+ 
+
+    return segments, EXIT_OK
+
+# -------------------------- MAIN EXECUTION ---------------------------------
+if __name__ == "__main__":
+
+    # ------------------------------------------------------------------
+    # HARD CHECK: ensure all required output directories exist
+    # ------------------------------------------------------------------
+    required_dirs = [
+        OUTPUT_DIR,
+        os.path.join(OUTPUT_DIR, "resids"),
+        os.path.join(OUTPUT_DIR, "timeseries"),
+        os.path.join(OUTPUT_DIR, "output_labels"),
+        os.path.join(OUTPUT_DIR, "output_groups"),
+    ]
+
+    for d in required_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    print("✓ All required output directories verified")
+
+    # --- Load & limit to 3 years ---
+    print("Downloading and limiting to first 3 years...")
+    df = pd.read_csv(URL, low_memory=False)
+
+    date_cols = [c for c in df.columns if '/' in c]
+    dates = pd.to_datetime(date_cols, format='%m/%d/%y')
+    mask = dates <= '2023-01-21'
+    # mask = (dates >= '2020-11-01') & (dates <= '2021-02-28')
+
+    date_cols_2y = [date_cols[i] for i, keep in enumerate(mask) if keep]
+
+    id_vars = ['FIPS']
+    df = df[id_vars + date_cols_2y]
+
+    # Melt once
+    df_long = df.melt(id_vars=id_vars, value_vars=date_cols_2y,
+                      var_name='Date_Str', value_name='Cumulative')
+    df_long['Date'] = pd.to_datetime(df_long['Date_Str'], format='%m/%d/%y')
+    df_long = df_long.sort_values(['FIPS', 'Date'])
+
+    # Compute daily cases
+    df_long['Daily'] = df_long.groupby('FIPS')['Cumulative'].diff().fillna(0).clip(lower=0)
+    all_segments = []
+    ews_forced_rows = []   # label = 1
+    ews_null_rows = []
+
+    NY_FIPS = [
+    36001, 36003, 36005, 36007, 36009, 36011, 36013, 36015, 36017, 36019,
+    36021, 36023, 36025, 36027, 36029, 36031, 36033, 36035, 36037, 36039,
+    36041, 36043, 36045, 36047, 36049, 36051, 36053, 36055, 36057, 36059,
+    36061, 36063, 36065, 36067, 36069, 36071, 36073, 36075, 36077, 36079,
+    36081, 36083, 36085, 36087, 36089, 36091, 36093, 36095, 36097, 36099,
+    36101, 36103, 36105, 36107, 36109, 36111, 36113, 36115, 36117, 36119,
+    36121, 36123, 36125, 36127, 36129, 36131, 36133, 36135, 36137, 36139
+    ]
+
+    CA_FIPS = [
+        6001, 6003, 6005, 6007, 6009, 6011, 6013, 6015, 6017, 6019,
+        6021, 6023, 6025, 6027, 6029, 6031, 6033, 6035, 6037, 6039,
+        6041, 6043, 6045, 6047, 6049, 6051, 6053, 6055, 6057, 6059,
+        6061, 6063, 6065, 6067, 6069, 6071, 6073, 6075, 6077, 6079,
+        6081, 6083, 6085, 6087, 6089, 6091, 6093, 6095, 6097, 6099,
+        6101, 6103, 6105, 6107, 6109, 6111, 6113, 6115, 6117, 6119
+    ]
+
+    state_fips = NY_FIPS + CA_FIPS
+
+    # Filter county groups
+    county_groups = [(fips, group) for fips, group in df_long.groupby('FIPS') 
+                     if pd.notna(fips)]
+    #                if pd.notna(fips) and int(fips) in state_fips]
+
+    # print(f"Processing {len(county_groups)} counties (NY + CA)")
+    
+    # county_groups = [(fips, group) for fips, group in df_long.groupby('FIPS') if pd.notna(fips)]
+
+    exit_counts = {}
+
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+        futures = [executor.submit(process_county_for_transcritical_windows, county_group) 
+                for county_group in county_groups]
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing all counties"):
+            segments, reason = future.result()
+            all_segments.extend(segments)
+            exit_counts[reason] = exit_counts.get(reason, 0) + 1
+
+    if len(all_segments) == 0:
+        print("No segments generated.")
+        exit()
+    print("\n=== EXIT REASONS SUMMARY ===")
+    total = sum(exit_counts.values())
+    for k, v in sorted(exit_counts.items(), key=lambda x: -x[1]):
+        print(f"{k:30s}: {v:5d} ({v/total:.1%})")
+        
+    # 1. Sort to ensure pairs (label 0 and 1) are processed together
+    all_segments.sort(key=lambda x: (x['fips'], x.get('local_pair_id', 0)))
+
+    id_mapping = {}
+    next_seq_id = 1
+
+    for seg in all_segments:
+        key = (seg['fips'], seg['local_pair_id'])
+
+        if key not in id_mapping:
+            id_mapping[key] = next_seq_id
+            next_seq_id += 1
+
+        seg['sequence_ID'] = id_mapping[key]
+
+    # 2. Assign Global Sequential Integer IDs
+    '''
+    id_mapping = {}
+    next_seq_id = 1
+
+    for seg in all_segments:
+        # Use the pair_id (UUID) or (fips, local_id) to map to a simple integer
+        # If you used the updated worker I suggested, use seg['pair_id'] here
+        pid = seg['pair_id'] 
+        
+        if pid not in id_mapping:
+            id_mapping[pid] = next_seq_id
+            next_seq_id += 1
+        
+        seg['sequence_ID'] = id_mapping[pid]
+
+    # 3. Validation Clean-up (Alignment Bug Fix)
+    # Since the new worker logic only returns segments if BOTH pass too_many_zeros,
+    # we no longer need to find 'bad_ids' here. We can proceed directly to saving.
+    print(f"Assigned sequential IDs 1 through {next_seq_id - 1}")
+    '''
+    labels = []
+    id_to_fips = []
+
+    for seg in all_segments:
+        residuals = seg['residuals']
+        sid = seg['sequence_ID']
+        suffix = "forced" if seg['label'] == 1 else "null"
+
+        # Save residuals CSV
+        pd.DataFrame({
+            'Time': np.arange(len(residuals)),
+            'residuals': residuals
+        }).to_csv(f"{OUTPUT_DIR}/resids/resids_COVID_county_{suffix}{sid}.csv", index=False)
+
+        # Save detailed timeseries CSV
+        pd.DataFrame({
+            'Time': np.arange(len(seg['raw_I'])),
+            'raw_I': seg['raw_I'],
+            'smoothed': seg['smoothed'],
+            'ac1': seg['ac1'],
+            'variance': seg['variance']
+        }).to_csv(f"{OUTPUT_DIR}/timeseries/timeseries_COVID_county_{suffix}{sid}.csv", index=False)
+
+        # Append mapping
+        id_to_fips.append({
+            'sequence_ID': sid,
+            'FIPS': int(seg['fips']),
+            'start_date': seg.get('start_date', 'unknown'),
+            'end_date': seg.get('end_date', 'unknown'),
+            'label': seg['label']
+        })
+
+        # Append EWS long-format rows
+        ews_rows = []
+        series_len = len(seg['raw_I'])
+        for t in range(series_len):
+            ews_rows.append({
+                'sid': sid,
+                'Variable': 'I',
+                'Time': t,
+                'state': seg['raw_I'][t],
+                'smoothing': seg['smoothed'][t],
+                'residuals': seg['residuals'][t],
+                'ac1': seg['ac1'][t] if not np.isnan(seg['ac1'][t]) else '',
+                'variance': seg['variance'][t] if not np.isnan(seg['variance'][t]) else ''
+            })
+        if seg['label'] == 1:
+            ews_forced_rows.extend(ews_rows)
+        else:
+            ews_null_rows.extend(ews_rows)
+
+        labels.append({'sequence_ID': sid, 'class_label': seg['label']})
+
+    pd.DataFrame(id_to_fips).to_csv(
+        f"{OUTPUT_DIR}/sequence_id_to_fips.csv", index=False
+    )
+    print(f"Saved mapping for {len(id_to_fips):,} sequences → {OUTPUT_DIR}/sequence_id_to_fips.csv")
+
+    df_labels = pd.DataFrame(labels)
+    df_labels.to_csv(f"{OUTPUT_DIR}/output_labels/labels.csv", index=False)
+    
+    pd.DataFrame(ews_forced_rows).to_csv(
+    f"{OUTPUT_DIR}/df_ews_forced_COVID_county.csv",
+    index=False
+    )
+
+    pd.DataFrame(ews_null_rows).to_csv(
+        f"{OUTPUT_DIR}/df_ews_null_COVID_county.csv",
+        index=False
+    )
+
+    print("Saved df_ews_forced_COVID_county.csv")
+    print("Saved df_ews_null_COVID_county.csv")
+
+    print(f"Saved EWS metrics → {OUTPUT_DIR}/df_ews_null_COVID_county.csv")
+
+    # Train/val/test split
+    np.random.seed(42)
+    groups = np.random.choice([1, 2, 3], size=len(df_labels), p=[0.8, 0.1, 0.1])
+    pd.DataFrame({
+        'sequence_ID': df_labels['sequence_ID'],
+        'dataset_ID': groups
+    }).to_csv(f"{OUTPUT_DIR}/output_groups/groups.csv", index=False)
+
+
+    # Zip residuals
+    print("Creating output_resids.zip...")
+    with zipfile.ZipFile(f"{OUTPUT_DIR}/output_resids.zip", 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(f"{OUTPUT_DIR}/resids"):
+            for f in files:
+                zf.write(os.path.join(root, f), arcname=f)
+
+    print("Creating output_timeseries.zip...")
+    with zipfile.ZipFile(f"{OUTPUT_DIR}/output_timeseries.zip", 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(f"{OUTPUT_DIR}/timeseries"):
+            for f in files:
+                zf.write(os.path.join(root, f), arcname=f)
+    print("\n=== FINISHED ===")
+    print(f"Output folder: {OUTPUT_DIR}")
+    print(f"Total segments: {len(df_labels):,}")
+    final_forced = sum(1 for l in labels if l['class_label'] == 1)
+    final_null   = sum(1 for l in labels if l['class_label'] == 0)
+
+    print(f"Final forced: {final_forced:,}")
+    print(f"Final null: {final_null:,}")
+    print(f"Final total: {final_forced + final_null:,}")
+    print(f"\nFiles saved:")
+    print(f"  - {OUTPUT_DIR}/resids/ (residuals CSVs)")
+    print(f"  - {OUTPUT_DIR}/timeseries/ (detailed time series CSVs)")
+    print(f"  - {OUTPUT_DIR}/output_resids.zip")
+    print(f"  - {OUTPUT_DIR}/output_timeseries.zip")
