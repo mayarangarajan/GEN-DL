@@ -3,12 +3,11 @@ All codes and training data for GEN-DL
 
 Codes
 1. training_code: code used to train GEN-DL_model
-2. tf_env: terminal environment files
-3. data_generation_testing: SEIPR data for testing
-4. data_generation_training: GEN-DL training daa
-5. analysis_codes: latent space analysis and critical slowing down analysis (on disease data)
-6. AUC_charting_codes: plot AUC results
-7. Codes
+2. data_generation_testing: SEIPR data for testing
+3. data_generation_training: GEN-DL training daa
+4. analysis_codes: latent space analysis and critical slowing down analysis (on disease data)
+5. AUC_charting_codes: plot AUC results
+6. Codes
         trained_dl_models_and_testing
             GEN-DL model
             Chakraborty model
