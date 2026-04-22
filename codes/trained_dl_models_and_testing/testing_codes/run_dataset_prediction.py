@@ -128,7 +128,7 @@ for index, filepath in enumerate(resid_files):
         '''
 
         # Setup file to store DL predictions
-        predictions_file_name = '../dl_train/predictions/y_pred_{}_{}.csv'.format(kk,model_type)
+        predictions_file_name = './predictions/y_pred_{}_{}.csv'.format(kk,model_type)
         f1 = open(predictions_file_name,'w')
 
         # Loop through each possible length of padding
