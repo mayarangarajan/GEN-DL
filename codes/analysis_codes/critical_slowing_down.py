@@ -681,7 +681,7 @@ if len(df_all) >= 5:
         interpretation_entropy = "○ No clear pattern"
     print(f"  Spectral entropy: median shift {df_all['entropy_shift'].median():+.4f}, {interpretation_entropy}")
 
-# --- Correlations (KEY for your claim) ---
+# --- Correlations ---
 print("\nCorrelation analysis:")
 
 try:
@@ -907,7 +907,6 @@ plt.savefig(f"{OUTPUT_DIR}/summary_bar_chart.png", dpi=300, bbox_inches='tight')
 plt.close()
 
 # -------------------------- GENERATE COMPARISON TABLE --------------------------
-# -------------------------- GENERATE COMPARISON TABLE --------------------------
 print("\n" + "="*80)
 print("GENERATING DISEASE COMPARISON TABLE")
 print("="*80)
@@ -919,7 +918,7 @@ def create_disease_comparison_table(all_results):
     """
     from scipy.stats import mannwhitneyu, ks_2samp
     
-    # Define metrics to include - matching your requirements
+    # Define metrics to include 
     metrics = [
         # --- Core spectral structure ---
         ('null_dominant_period', 'Dominant Period (Null)'),

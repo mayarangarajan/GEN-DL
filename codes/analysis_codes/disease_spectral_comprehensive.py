@@ -73,7 +73,7 @@ class Config:
     SIR_SAMPLE_SIZE = None    # None = use all, or set a number to sample
     RANDOM_SEED = 42          # For reproducibility
     
-    # Data paths - UPDATE THESE TO MATCH YOUR DIRECTORY STRUCTURE
+    # Data paths
     BASE_PATH = Path(".")
     SEIPR_PATH = Path("../../training_data/resids")
     
@@ -657,13 +657,7 @@ def create_ood_visualization(df_all, df_ood, disease_display_labels):
     ax.scatter(seipr_freq[sample_idx, 0], seipr_freq[sample_idx, 1],
               c=Config.COLORS['SEIPR'], alpha=0.3, s=30,
               label='GEN-DL data', zorder=1)
-    
-    # Plot SEIPR centroid (smaller)
-    seipr_centroid = seipr_freq.mean(axis=0)
-    #ax.scatter(seipr_centroid[0], seipr_centroid[1],
-    #          c=Config.COLORS['SEIPR'], marker='X', s=150,
-    #          edgecolors='black', linewidth=1.5,
-    #          label='SEIPR Centroid', zorder=5)
+
     
     # Plot diseases
     diseases = [d for d in df_all['dataset'].unique() if d not in ['SEIPR']]

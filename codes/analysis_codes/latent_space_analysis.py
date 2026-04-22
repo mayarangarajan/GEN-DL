@@ -59,7 +59,7 @@ disease_list_all = list(diseases.keys())
 disease_list_no_flu = [d for d in diseases.keys() if d != 'Influenza']
 
 
-# Load your trained model
+# Load trained model
 model_path = f'./trained_GEN-DL_models/best_model_1_1_length{ts_len}.keras'
 full_model = load_model(model_path, compile=False)
 
@@ -85,7 +85,7 @@ print(f"Feature extractor output shape: {feature_extractor.output.shape}")
 
 
 def load_and_process_sequence(filepath):
-    """Load residual time series and pad/normalize like your testing code"""
+    """Load residual time series and pad"""
     df = pd.read_csv(filepath).dropna()
     
     resids = df['residuals'].values
@@ -99,7 +99,6 @@ def load_and_process_sequence(filepath):
         temp_ts[0, :, 0] = resids[-ts_len:]
     else:
         # Pad at beginning with zeros, put data at end
-        # This matches your testing code logic
         ts_gap = ts_len - seq_len
         temp_ts[0, ts_gap:, 0] = resids
     
@@ -318,7 +317,7 @@ report_lines.append(f"\nMean pairwise Silhouette (Raw space): {mean_pairwise_raw
 mean_pairwise_raw_no_flu = np.mean([v for k, v in pairwise_raw.items() if 'Influenza' not in k])
 report_lines.append(f"Mean pairwise Silhouette (Raw space, no Influenza): {mean_pairwise_raw_no_flu:.4f}")
 
-# Use your existing variables (no influenza versions)
+# Use existing variables (no influenza versions)
 regime_raw = mean_null_tc_raw_no_flu
 disease_raw = mean_pairwise_raw_no_flu
 
@@ -398,7 +397,7 @@ report_lines.append(f"Mean pairwise Silhouette (Raw space, TC only, no Influenza
 
 # ===== SIGNAL DOMINANCE (REGIME / DISEASE) =====
 
-# Use your existing variables (no influenza versions)
+# Use existing variables (no influenza versions)
 regime_raw = mean_null_tc_raw_no_flu
 disease_raw = mean_pairwise_raw_no_flu
 
