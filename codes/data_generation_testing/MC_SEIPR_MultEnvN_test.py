@@ -1,6 +1,12 @@
 #Training data generation of SIR model with Multiplicative Environmental Noise
 #Edited from published codes by Bury et al. (2021), Deep learning for early warning signals of tipping points, PNAS. 
 #python libraries
+#
+#
+#
+# Chakraborty et al. (2024), An early warning indicator trained on stochastic disease-spreading models with different noises
+# https://zenodo.org/records/12537663
+#
 # modified by Maya Rangarajan
 
 import warnings
