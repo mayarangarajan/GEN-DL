@@ -22,3 +22,8 @@ PROCESS FOR TESTING
 4. Step 4: run plot_empirical.py for each disease dataset
 
 5. You can skip Step 2 and run just steps 3 and 4 as the folder already contains outputs from Step 2.
+
+All Bury and Chakraborty results from Chakraborty et al. (2025) Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model
+https://zenodo.org/records/15377482
+
+SIDATR results for COVID_county calculated by Maya Rangarajan using testing pipeline
