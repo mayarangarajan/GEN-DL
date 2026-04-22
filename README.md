@@ -17,7 +17,7 @@ Codes
 
 PROCESS FOR TESTING
 1. Step 1: Navigate to codes/trained_dl_models_and_testing folder
-2. Step 2: run run_data_set_predictions.py for each disease dataset (mpox, flu, COVID, COVID_county)
+2. Step 2: run run_data_set_prediction.py for each disease dataset (mpox, flu, COVID, COVID_county)
 3. Step 3: run organize_ml_predictions.py for each disease dataset
 4. Step 4: run plot_empirical.py for each disease dataset
 
