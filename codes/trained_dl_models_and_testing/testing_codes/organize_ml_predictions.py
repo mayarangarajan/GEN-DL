@@ -8,6 +8,8 @@
 Organise ML data output of empirical datasets by Chakraborty et al's model into a single dataframe. 
 Edited from published codes by Bury et al. (2021), 
 Deep learning for early warning signals of tipping points, PNAS. 
+Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model (2025)
+https://zenodo.org/records/15377482
 
 FUNCTION
 Aggregates all predictions into dl_ml_forced.csv and dl_ml_null.csv

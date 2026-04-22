@@ -9,6 +9,8 @@ Code to generate predictions from the Chakraborty et al.'s DL classifiers
 on a give time series of residuals
 Edited from published codes by Bury et al. (2021), 
 Deep learning for early warning signals of tipping points, PNAS. 
+Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model (2025)
+https://zenodo.org/records/15377482
 Edited by Maya Rangarajan
 1. Added GEN-DL
 2. Updated Chakraborty load

@@ -8,6 +8,10 @@
 plot ROC curves for empirical data by all the DL models and statistical indicators
 Edited from published codes by Bury et al. (2021), 
 Deep learning for early warning signals of tipping points, PNAS. 
+
+Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model (2025)
+https://zenodo.org/records/15377482
+
 Modified by Maya Rangarajan to drop zero predictions
 """
 
