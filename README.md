@@ -12,7 +12,7 @@ Codes
             GEN-DL model/
             Chakraborty model/
             Codes, data for testing/
-    Output charts/ (all outputs saved here)
+    output_charts/ (all outputs saved here)
 
 
 PROCESS FOR TESTING
