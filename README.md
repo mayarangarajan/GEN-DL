@@ -7,12 +7,12 @@ Codes
 3. data_generation_training: GEN-DL training daa
 4. analysis_codes: latent space analysis and critical slowing down analysis (on disease data)
 5. AUC_charting_codes: plot AUC results
-6. Codes
-        trained_dl_models_and_testing
-            GEN-DL model
-            Chakraborty model
-            Codes, data for testing
-    Output charts (all outputs saved here)
+6. Codes/
+        trained_dl_models_and_testing/
+            GEN-DL model/
+            Chakraborty model/
+            Codes, data for testing/
+    Output charts/ (all outputs saved here)
 
 
 PROCESS FOR TESTING
