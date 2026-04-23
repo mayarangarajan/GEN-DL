@@ -4,7 +4,13 @@
 #
 # Chakraborty et al. (2024), An early warning indicator trained on stochastic disease-spreading models with different noises
 # https://zenodo.org/records/12537663
-# modified by Maya Rangarajan
+# 
+# 
+#  modified by Maya Rangarajan
+#  1. Extended SIR to SEIPR
+#  2. Extract null from each transcritical run
+#  3. Parallelized simulations
+#
 #
 #  INSTRUCTIONS:
 #  This code generates both null and transcritical synthetic data in one run
