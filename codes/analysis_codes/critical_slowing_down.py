@@ -13,6 +13,8 @@ from scipy.stats import mannwhitneyu, wilcoxon
 import glob
 import re
 from matplotlib.backends.backend_pdf import PdfPages
+from scipy.stats import binomtest
+
 
 # -------------------------- CONFIG -----------------------------------------
 DATA_DIR = "./"
@@ -35,13 +37,13 @@ DISEASES = {
         'color': '#3498db',
         'expected_gen_time': 12
     },
-    'flu-UK': {
-        'data_dir': './flu/data/resids',
-        'pattern': 'resids*.csv',
-        'label': 'Influenza',
-        'color': '#2ecc71',
-        'expected_gen_time': 3
-    },
+    #'flu-UK': {
+    #    'data_dir': './flu/data/resids',
+    #    'pattern': 'resids*.csv',
+    #    'label': 'Influenza',
+    #    'color': '#2ecc71',
+    #    'expected_gen_time': 3
+    #},
     'COVID_county': {
         'data_dir': './COVID_county/data/resids',
         'pattern': 'resids_COVID_county_*.csv',
@@ -793,15 +795,28 @@ for i, ax in enumerate(axes):
     df_pairs['low_freq_z_shift'] = (
         df_pairs['low_freq_shift'] / null_std
     ) if null_std > 0 else np.nan
-    df_pairs['is_redshift'] = df_pairs['low_freq_z_shift'] > 1
+    df_pairs['is_redshift'] = df_pairs['low_freq_z_shift'] > 1.5
     redshift_pct = df_pairs['is_redshift'].mean() * 100
+
+    n_red = df_pairs['is_redshift'].sum()
+    n_total = len(df_pairs)
+
+    binom_res = binomtest(
+        n_red,
+        n_total,
+        p=0.5,
+        alternative='greater'
+    )
+
+    redshift_p = binom_res.pvalue
+    p_text = "p < 0.0001" if redshift_p < 1e-4 else f"p = {redshift_p:.4f}"
 
     # ROW 1: main metric
     fig.text(
         x_left, metric_row1_y,
-        f"Low freq shift: {mean_shift:+.3f}"
+        f"Low freq shift: {mean_shift:+.3f} "
         f"({pct_shift:+.1f}%)\n"
-        f"% outbreaks slowing: {redshift_pct:.1f}%",
+        f"% outbreaks slowing: {redshift_pct:.1f}% ",
         linespacing=1.2,
         ha='left',
         va='center',

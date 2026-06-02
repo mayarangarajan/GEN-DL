@@ -110,7 +110,7 @@ class Config:
     }
     
     # Output configuration
-    OUTPUT_DIR = Path(".,/../output_charts/raw_spectral_analysis")
+    OUTPUT_DIR = Path("./../output_charts/raw_spectral_analysis")
     FIGURE_FORMAT = 'png'
     FIGURE_DPI = 300
 

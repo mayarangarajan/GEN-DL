@@ -91,16 +91,12 @@ for index, filepath in enumerate(resid_files):
     # Construct the output file path
     # filepath_out = f"{dataset}/data/ml_pred_GEN-DL/pred_{filename}"
     os.makedirs(f"{dataset}/data/ml_pred_{test_model}", exist_ok=True)
-    filepath_out = f"{dataset}/data/ml_pred_{test_model}/pred_{filename}"
-
-    # Type of classifier to use (100 or 500)
-                                                                        
+    filepath_out = f"{dataset}/data/ml_pred_{test_model}/pred_{filename}"                                                                        
 
     # Steps of datapoints in between each DL prediction
     mult_factor = 10
 
     # Total number of DL predictions to make
-    # Use 50 for length 500 time series. Use 10 for length 100 time series.
     pad_samples = int(ts_len/mult_factor)                                                          
 
     df = pd.read_csv(filepath).dropna()

@@ -39,8 +39,7 @@ model = 'GEN-DL'      # 'GEN-DL', 'Chakraborty'
 df_ews = pd.read_csv('{}/data/ews/df_ews_forced.csv'.format(dataset))
 df_ews = df_ews[df_ews['Variable']=='I']
 
-# Get all file names of ML predictions from SIR data trained model
-# all_files = os.listdir('{}/data/ml_pred_GEN-DL/'.format(dataset))
+# Get all file names of ML predictions 
 all_files = os.listdir('{}/data/ml_pred_{}/'.format(dataset,model))
 # all_files = [f for f in all_files if f.split('_')[0]=='ensemble']
 
@@ -51,7 +50,7 @@ all_files_forced = [s for s in all_files if s.find('forced')!=-1]
 
 
 #----------------
-# Organise data for forced trajectories
+# Organize data for forced trajectories
 #-----------------
 
 list_df_ml = []
@@ -108,7 +107,7 @@ df_ml.to_csv('{}/data/ml_pred_{}/df_ml_forced.csv'.format(dataset, model), index
 
 
 #----------------
-# Organise data for null trajectories
+# Organize data for null trajectories
 #-----------------
 
 list_df_ml = []
@@ -138,7 +137,7 @@ for filename in all_files_null:
     # Get time values for this transition
     tVals = df_ews[(df_ews['tsid']==tsid)]['Time'].values
 
-    # Take last 'classifier_length' time points of data
+    # Take last classifier_length time points of data
     tValsLast = tVals[-classifier_length:]
     # If shorter than classifier_length points, pad with Nan (this is done prior to using ML)
     if len(tValsLast)<classifier_length:

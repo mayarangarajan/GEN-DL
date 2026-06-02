@@ -25,11 +25,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.image as mpimg
 import plotly.graph_objects as go
 
-test_model='COVID_county'                          # [flu,  COVID, mpox, COVID_county]
+test_model='COVID_county'  # [flu,  COVID, mpox, COVID_county]
 
-# -----------------------------
-# Add this function after roc_compute()
-# -----------------------------
+
 def compute_metrics_at_sensitivity(truth_vals, indicator_vals, target_sensitivity=0.75):
     """
     Computes threshold at given sensitivity and complementary metrics:
@@ -117,8 +115,7 @@ def ROC_test_model_empirical(test_model, model):
                 df = df_ews_forced[(df_ews_forced['tsid']==tsid)&\
                                 (df_ews_forced['Variable']==var)
                                 ]
-            # Get time n% of way through time series
-
+            
             t_start = df['Time'].iloc[0]
             t_transition = df[['Time','residuals']].dropna()['Time'].iloc[-1] # where the residuals end
 
@@ -148,10 +145,6 @@ def ROC_test_model_empirical(test_model, model):
             list_df_ml_preds.append(df_ml_forced_final)
 
 
-            # df_ml_forced_final = df_ml_forced[(df_ml_forced['tsid']==tsid)].tail(n_predictions)
-            # list_df_ml_preds.append(df_ml_forced_final)
-
-
     # Get predictions from null trajectories
     tsid_vals = df_ml_null['tsid'].unique()
     for tsid in tsid_vals:
@@ -166,15 +159,12 @@ def ROC_test_model_empirical(test_model, model):
                 df = df_ews_null[(df_ews_null['tsid']==tsid)&\
                                 (df_ews_null['Variable']==var)                               ##var vs variable
                                 ]
-            # Get time n% of way through time series
             t_start = df['Time'].iloc[0]
             t_transition = df[['Time','residuals']].dropna()['Time'].iloc[-1] # where the residuals end
 
             # Get prediction interval in time
             t_pred_start = t_start + (t_transition-t_start)*pred_interval_rel[0]
             t_pred_end = t_start + (t_transition-t_start)*pred_interval_rel[1]
-
-            # print(df, t_start, t_transition)
 
             # Extract 10 evenly spaced predictions for each transitpython /Users/maya/Research/codes/trained_dl_models_and_testing/testing_codes/plots-empirical.pyion
             n_predictions = 10
@@ -283,12 +273,6 @@ def ROC_test_model_empirical(test_model, model):
 
     return df_roc_full, thresholds_dict, df_ml_preds
 
-
-
-# In[ ]:
-
-
-
 df_ROC_GEN_DL, thresholds_GEN_DL, df_ml_GEN_DL = ROC_test_model_empirical(test_model, 'ml_pred_GEN-DL')
 # df_ROC_Bury = ROC_test_model_empirical(test_model, 'ml_pred_Bury') 
 df_ROC_Chakraborty, thresholds_Chakraborty, df_ml_Chakraborty = ROC_test_model_empirical(test_model, 'ml_pred_Chakraborty') 
@@ -313,19 +297,15 @@ metrics_df = pd.concat([
     df_table_Chakraborty.assign(Model='Chakraborty')
 ], ignore_index=True)
 
-# Optional: reorder columns so Model is first
+# reorder columns so Model is first
 metrics_df = metrics_df[['Model', 'Threshold', 'Sensitivity', 'Specificity', 'Precision', 'F1 score', 'AUC']]
 
-# Print nicely
+# Print 
 print("=== GEN-DL Metrics at 0.75 Sensitivity ===")
 print(df_table_GEN_DL.round(4).to_string(index=False))
 
 print("\n=== Chakraborty Metrics at 0.75 Sensitivity ===")
 print(df_table_Chakraborty.round(4).to_string(index=False))
-
-# In[9]:
-
-
 
 fig = go.Figure()
 df_roc = df_ROC_GEN_DL
@@ -419,18 +399,7 @@ fig.update_layout(
         y=0.9
     )
 )
-'''
-# Add thresholds annotation for GEN-DL
-threshold_text = "Thresholds (specificity = 0.75)<br><br>"
 
-threshold_text += "<b>GEN-DL</b><br>"
-for key, val in thresholds_GEN_DL.items():
-    threshold_text += f"{key}: {val:.3f}<br>"
-
-threshold_text += "<br><b>Chakraborty</b><br>"
-for key, val in thresholds_Amit.items():
-    threshold_text += f"{key}: {val:.3f}<br>"
-'''
 fig.write_image(f'../../output_charts/ROC/{test_model}-ROC.png')
 output_path = f'../../output_charts/ROC/{test_model}-ROC.png'
 fig.write_image(output_path, scale=2)
