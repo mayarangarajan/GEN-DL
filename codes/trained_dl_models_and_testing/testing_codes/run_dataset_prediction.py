@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
 '''
 Code to generate predictions from the Chakraborty et al.'s DL classifiers
 on a give time series of residuals
@@ -18,6 +12,9 @@ Edited by Maya Rangarajan
 
 INPUT
 1. Null/TC resids files for dataset tested
+
+RUN
+1. RUN FROM TRAINED_DL_MODELS_AND_TESTING folder
 
 OUTPUT
 1. pred_resids_{dataset}.csv in .{dataset}/data/ml_pred_{test_model}
@@ -52,8 +49,8 @@ random.seed(42)
 ### ====== SET BEFORE RUNNING CODE ===============================
 ##################################################################
 
-dataset = 'COVID_county'                #[COVID, COVID_county, mpox, flu]     
-test_model = 'GEN-DL'              # [Chakraborty, GEN-DL]  
+dataset = 'COVID'                #[COVID, COVID_county, COVID_state, mpox, flu, SEIPR_MultNoise, SEIPR_AddNoise, SIR_MultNoise, SIR_AddNoise]     
+test_model = 'GEN-DL'            # [Chakraborty, GEN-DL]  
 ts_len=100  
 
 resid_files = glob("./{}/data/resids/resids*.csv".format(dataset))
@@ -178,8 +175,6 @@ for index, filepath in enumerate(resid_files):
 
         return 
 
-
-
     # Compute DL predictions from all 2 trained models
     for model_type in [1,2]:                                
         for kk in np.arange(1,2):
@@ -188,14 +183,11 @@ for index, filepath in enumerate(resid_files):
 
             get_dl_predictions(resids, model_type, kk, model=models[(kk, model_type)])
 
-
-
-
     # Compute average prediction among all 2 DL classifiers
     list_df_preds = []
     for model_type in [1,2]:
         for kk in np.arange(1,2):
-            filename = '../dl_train/predictions/y_pred_{}_{}.csv'.format(kk,model_type)
+            filename = './predictions/y_pred_{}_{}.csv'.format(kk,model_type)
             df_preds = pd.read_csv(filename,header=None)
             df_preds['time_index'] = df_preds.index
             df_preds['model_type'] = model_type
