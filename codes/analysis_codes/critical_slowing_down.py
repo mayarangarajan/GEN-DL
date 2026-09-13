@@ -1,6 +1,7 @@
 # =============================================================================
 # PAIRED ANALYSIS: Null vs Forced Spectral Comparison
 # Testing spectral shift in the last 4 weeks approaching bifurcation
+# Developed by Maya Rangarajan, 2026
 # =============================================================================
 
 import pandas as pd
@@ -25,28 +26,28 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 DISEASES = {
     'COVID': {
         'data_dir': './COVID/data/resids',
-        'pattern': 'resids_COVID_*.csv',
+        'pattern': 'resids*.csv',
         'label': 'COVID',
         'color': '#c0392b',
         'expected_gen_time': 5
     },
     'mpox': {
         'data_dir': './mpox/data/resids',
-        'pattern': 'resids_mpox_*.csv',
+        'pattern': 'resids*.csv',
         'label': 'Mpox',
         'color': '#3498db',
         'expected_gen_time': 12
     },
-    #'flu-UK': {
-    #    'data_dir': './flu/data/resids',
-    #    'pattern': 'resids*.csv',
-    #    'label': 'Influenza',
-    #    'color': '#2ecc71',
-    #    'expected_gen_time': 3
-    #},
-    'COVID_county': {
-        'data_dir': './COVID_county/data/resids',
-        'pattern': 'resids_COVID_county_*.csv',
+    'Influenza': {
+        'data_dir': './flu/data/resids',
+        'pattern': 'resids*.csv',
+        'label': 'Influenza',
+        'color': '#2ecc71',
+        'expected_gen_time': 3
+    },
+    'COVID U.S.': {
+        'data_dir': './COVID_state/data/resids',
+        'pattern': 'resids*.csv',
         'label': 'COVID U.S.',
         'color': '#34495e',
         'expected_gen_time': 5
@@ -298,7 +299,6 @@ def compute_spectral_features(residuals, fs=1.0):
 
 def extract_tsid(filename):
     """Extract time series ID from filename"""
-    # Match patterns like: resids_COVID_null5.csv or resids_COVID_forced5.csv
     match = re.search(r'(null|forced)(\d+)', filename)
     if match:
         return int(match.group(2))
@@ -763,12 +763,12 @@ for idx, disease_key in enumerate(disease_keys):
     
     ax.set_xticks([0, 1])
     ax.set_xticklabels(['Null',
-                        'Forced'], fontsize=11)
+                        'Forced'], fontsize=14)
     
-    ax.set_ylabel('Low-Freq Power (<0.1 c/d)', fontsize=12)
+    ax.set_ylabel('Low-Freq Power (<0.1 c/d)', fontsize=16)
     
     ax.set_title(f'{config["label"]} (N={len(pairs)})',
-                 fontsize=12, fontweight='bold', loc='left')
+                 fontsize=16, fontweight='bold', loc='left')
     
     ax.grid(True, alpha=0.3, axis='y')
 
@@ -796,7 +796,17 @@ for i, ax in enumerate(axes):
         df_pairs['low_freq_shift'] / null_std
     ) if null_std > 0 else np.nan
     df_pairs['is_redshift'] = df_pairs['low_freq_z_shift'] > 1.5
+
+    df_pairs['pct_low_freq_increase'] = (
+    (df_pairs['forced_low_freq'] - df_pairs['null_low_freq'])
+    / df_pairs['null_low_freq']
+    ) * 100
+
+    df_pairs['is_redshift'] = df_pairs['pct_low_freq_increase'] >= 100
     redshift_pct = df_pairs['is_redshift'].mean() * 100
+    # redshift_pct = (df_pairs['low_freq_shift'] > 0).mean() * 100
+    # redshift_pct = df_pairs['is_redshift'].mean() * 100
+
 
     n_red = df_pairs['is_redshift'].sum()
     n_total = len(df_pairs)
@@ -814,13 +824,13 @@ for i, ax in enumerate(axes):
     # ROW 1: main metric
     fig.text(
         x_left, metric_row1_y,
-        f"Low freq shift: {mean_shift:+.3f} "
-        f"({pct_shift:+.1f}%)\n"
-        f"% outbreaks slowing: {redshift_pct:.1f}% ",
+        f"Low frequency shift: \n "
+        f"{mean_shift:+.3f} ({pct_shift:+.1f}%)\n",
+        # f"% outbreaks slowing: {redshift_pct:.1f}% ",
         linespacing=1.2,
         ha='left',
         va='center',
-        fontsize=10
+        fontsize=16
     )
 
 
@@ -897,7 +907,7 @@ x_pos = np.arange(len(diseases))
 bars = ax.bar(x_pos, shifts, color=colors_list, alpha=0.8, edgecolor='black', linewidth=1.5)
 
 ax.axhline(0, color='black', linewidth=1, linestyle='-')
-ax.set_ylabel('Low-Freq Power Shift (%)\nForced vs Null', fontsize=13)
+ax.set_ylabel('Low-Freq Power Shift (%)\nForced vs Null', fontsize=13, labelpad=12)
 ax.set_title('Spectral Shift: Last 4 Weeks Approaching Bifurcation', 
             fontsize=14, fontweight='bold')
 ax.set_xticks(x_pos)
@@ -913,7 +923,7 @@ for i, (bar, shift) in enumerate(zip(bars, shifts)):
 
 # Add interpretation
 ax.text(0.02, 0.98, 'Positive = Reddening (Slowing)\nNegative = Blue-shift (Acceleration)', 
-       transform=ax.transAxes, fontsize=10, va='top',
+       transform=ax.transAxes, fontsize=14, va='top',
        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
 
 plt.tight_layout()
@@ -1068,7 +1078,7 @@ try:
     print(f"Saved comparison table: {table_path}")
     plt.close(fig_table)
     
-    # ========== SAVE TABLE DATA TO CSV (ADD THIS HERE) ==========
+    # ========== SAVE TABLE DATA TO CSV  ==========
     print("\nSaving table data to CSV files...")
     save_table_data_to_csv(all_results, OUTPUT_DIR)
     
