@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[7]:
-
-
 """
 plot ROC curves for empirical data by all the DL models and statistical indicators
 Edited from published codes by Bury et al. (2021), 
@@ -25,8 +19,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.image as mpimg
 import plotly.graph_objects as go
 
-test_model='COVID_county'  # [flu,  COVID, mpox, COVID_county]
-
+test_model='mpox'  # [flu,  COVID, mpox, COVID_county, COVID_state, SEIPR_AddNoise, SEIPR_MultNoise, SIR_MultNoise, SIR_AddNoise]
 
 def compute_metrics_at_sensitivity(truth_vals, indicator_vals, target_sensitivity=0.75):
     """
@@ -94,7 +87,7 @@ def ROC_test_model_empirical(test_model, model):
     df_ml_forced['truth value'] = 1
     df_ml_null['truth value'] = 0
 
-    pred_interval_rel = np.array([0.5, 1.0])
+    pred_interval_rel = np.array([0.5, 1.0]) # was np.array([0.5, 1.0])
 
     list_df_ktau_preds = []
     list_df_ml_preds = []
@@ -124,19 +117,22 @@ def ROC_test_model_empirical(test_model, model):
             t_pred_end = t_start + (t_transition-t_start)*pred_interval_rel[1]
 
             # Extract 10 evenly spaced predictions for each transition
-            n_predictions = 10
+            n_predictions = 5 
 
             df_ktau_forced_final = df_ktau_forced[
                 (df_ktau_forced['tsid']==tsid)&\
                 (df_ktau_forced['Time'] >= t_pred_start)&\
                 (df_ktau_forced['Time'] <= t_pred_end)
                 ].tail(n_predictions)
+            '''
+            GEN-DL
             df_ml_forced_final = df_ml_forced[
                 (df_ml_forced['tsid']==tsid)&\
                 (df_ml_forced['Time'] >= t_pred_start)&\
                 (df_ml_forced['Time'] <= t_pred_end)                
-                ].tail(n_predictions)            
-
+                ].tail(n_predictions)
+            '''
+            df_ml_forced_final = df_ml_forced[df_ml_forced['tsid']==tsid].tail(n_predictions)
             # idx = np.round(np.linspace(0, len(df_ktau_forced_final) - 1, n_predictions)).astype(int)
             list_df_ktau_preds.append(df_ktau_forced_final)
 
@@ -167,19 +163,22 @@ def ROC_test_model_empirical(test_model, model):
             t_pred_end = t_start + (t_transition-t_start)*pred_interval_rel[1]
 
             # Extract 10 evenly spaced predictions for each transitpython /Users/maya/Research/codes/trained_dl_models_and_testing/testing_codes/plots-empirical.pyion
-            n_predictions = 10
+            n_predictions = 5
 
             df_ktau_null_final = df_ktau_null[
                 (df_ktau_null['tsid']==tsid)&\
                 (df_ktau_null['Time'] >= t_pred_start)&\
                 (df_ktau_null['Time'] <= t_pred_end)
                 ].tail(n_predictions)
+            '''
+            in GEN_DL
             df_ml_null_final = df_ml_null[
                 (df_ml_null['tsid']==tsid)&\
                 (df_ml_null['Time'] >= t_pred_start)&\
                 (df_ml_null['Time'] <= t_pred_end)                
                 ].tail(n_predictions)
-
+            '''
+            df_ml_null_final = df_ml_null[df_ml_null['tsid']==tsid].tail(n_predictions)
             # Drop rows where all values are zero (excluding 'Time' and 'tsid' columns if needed)
             df_ml_null_final = df_ml_null_final.loc[~(df_ml_null_final.drop(columns=['tsid', 'Time'], errors='ignore') == 0).all(axis=1)]
 
@@ -372,15 +371,25 @@ fig.update_yaxes(
 )
 
 if test_model=='COVID_county':
+    title = 'COVID U.S. (county)'
+elif test_model=='COVID_state':
     title = 'COVID U.S.'
 elif test_model=='seir_1500':
     title = 'SEIR'
 elif test_model=='flu':
-    title = 'FLU'
+    title = 'Influenza'
 elif test_model=='COVID':
     title = 'COVID Edmonton'
 elif test_model=='mpox':
     title = 'mpox'
+elif test_model=='SEIPR_AddNoise':
+    title = 'SEIPR_AddNoise'
+elif test_model=='SEIPR_MultNoise':
+    title = 'SEIPR_MultNoise'
+elif test_model=='SIR_AddNoise':
+    title = 'SIR_AddNoise'
+elif test_model=='SIR_MultNoise':
+    title = 'SIR_MultNoise'
 
 
 fig.update_layout(
