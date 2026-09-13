@@ -1,4 +1,4 @@
-#Training data generation of SIR model with Multiplicative Environmental Noise
+#Training data generation of SEIPQR model with Additive White Noise and COVID eigenvalue regime
 #Edited from published codes by Bury et al. (2021), Deep learning for early warning signals of tipping points, PNAS. 
 #python libraries
 #
