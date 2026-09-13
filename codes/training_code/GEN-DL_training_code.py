@@ -38,7 +38,7 @@ from tensorflow.keras.layers import Dense, LSTM, Dropout, Conv1D, MaxPooling1D, 
 from tensorflow.keras.optimizers import Adam
 
 from tensorflow.keras.models import load_model
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, Callback
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, Callback, ReduceLROnPlateau
 import keras_tuner as kt
 from datetime import datetime
 
@@ -73,24 +73,11 @@ all_data = None
 
 # ===== MODEL CONFIGURATION (Bury Architecture) =====
 
-''' ORIGINAL
-CNN_LAYERS        = 2 #switch between 1 and 2
-LSTM_LAYERS       = 1
-FILTERS           = 50
-KERNEL_SIZE       = 12
-POOL_SIZE         = 2
-MEM_CELLS         = 50
-MEM_CELLS2        = 10
-DROPOUT           = 0.10
-LEARNING_RATE     = 0.0005
-BATCH_SIZE        = 1000
-MAX_EPOCHS        = 200
-EARLY_STOPPING_PATIENCE = 20
-INITIALIZER       = 'lecun_normal'
-ALSO CHANGE AVEPOOL TO MAXPOOL
-'''
-### TRIAL ####
-CNN_LAYERS        = 2 #switch between 1 and 2
+
+### PUBLISHING-NO QUARANTINE ####
+
+
+CNN_LAYERS        = 2
 LSTM_LAYERS       = 2
 FILTERS           = 64
 KERNEL_SIZE       = 7
@@ -326,11 +313,21 @@ if __name__ == '__main__':
         save_weights_only=False
     )
 
+    lr_scheduler = ReduceLROnPlateau(
+        monitor='val_auc',
+        factor=0.5,       # New LR = LR * 0.5
+        patience=8,       # Wait 8 epochs before dropping
+        min_lr=1e-6,      # Floor limit for LR
+        verbose=1
+    )
+
+
     history = model.fit(
         train, train_target,
         epochs=MAX_EPOCHS,
         batch_size=BATCH_SIZE,
-        callbacks=[auc_callback, early_stop, chk],
+        callbacks=[auc_callback, early_stop, lr_scheduler,chk],
+        # callbacks=[auc_callback, early_stop, chk],
         validation_data=(validation, validation_target),
         verbose=1
     )
