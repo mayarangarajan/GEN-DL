@@ -43,13 +43,13 @@ from joblib import Parallel, delayed
 
 
 #  ============ SET THESE VARIABLES BEFORE RUN  =================
-count = 1 # batch number for directory
+count =  2 # batch number for directory
 sim_index = 22500 # starting index number is sim_index + 1
 numSims = 2500    # number of null/transcritical simulations
 block_size = 2500 # number of simulation runs per setting of pi and phi
 null_offset = 50000 # null index number is TC index number + null_offset
 LOW_FREQ_POWER = True
-HIGH_NOISE = False # run 10% of additive noise runs at higher noise level
+HIGH_NOISE = True # run 10% of additive noise runs at higher noise level
 NUM_THREADS = 12  # adjust to available CPU cores
 
 global_seed = 123456 + count * 111111
@@ -102,20 +102,23 @@ ews = ['var','ac']
 
 
 # Model
-def de_fun_S(S,I,P, Lambda, beta,pi, phi, mu):
-  return Lambda-mu*S-beta*S*I-pi*S+phi*P
+def de_fun_S(S,I,P,Q,Lambda, beta,pi, phi,epsilon_q,mu):
+  return Lambda-mu*S-beta*S*I-pi*S+phi*P-beta*(1- epsilon_q)*S*Q
 
-def de_fun_E(S,E,I,P,beta,theta, epsilon, mu):
-  return beta*S*I-(mu+theta)*E+(1-epsilon)*beta*P*I
+def de_fun_E(S,E,I,P,Q, beta,theta, epsilon, epsilon_q, mu):
+  return beta*S*I-(mu+theta)*E+(1-epsilon)*beta*P*I+(1-epsilon_q)*beta*S*Q
 
-def de_fun_I(E,I,theta,gamma,mu):
-  return theta*E-(mu+gamma)*I
+def de_fun_I(E,I,theta,gamma,delta, mu):
+  return theta*E-(mu+gamma+delta)*I
 
 def de_fun_P(S,I,P,beta,pi,phi,epsilon,mu):
    return pi*S-(mu+phi)*P-(1-epsilon)*beta*P*I
 
-def de_fun_R(I,R,gamma,mu):
-  return gamma*I-mu*R
+def de_fun_Q(Q, I, delta, mu, tau):
+    return delta*I - (mu+tau)*Q
+
+def de_fun_R(I,R,Q,gamma,tau,mu):
+  return gamma*I+tau*Q-mu*R
 
 def save_csv(i, groups, count, sim_index):
     sid = sim_index + i
@@ -193,11 +196,16 @@ S0_init = 500
 I0_init = 2
 E0_init = 2
 P0_init = 1
+Q0_init = 1
 R0_init = 2
-mu = 0.75 if not LOW_FREQ_POWER else 2
-theta= 2 if not LOW_FREQ_POWER else 4
-gamma = 1 if not LOW_FREQ_POWER else 2
+mu = 0.75 
+theta= 4  # was 2
+gamma = 2  # was 1
 epsilon = 0.6
+epsilon_q = 0.85
+
+delta = master_rng.uniform(0.1,0.3) # was (0.1,0.3)
+tau = master_rng.uniform(0.048,0.071)
 
 num_blocks = int(np.ceil(numSims / block_size))
 
@@ -291,6 +299,7 @@ S_last = []
 E_last = []
 I_last = []
 P_last = []
+Q_last = []
 R_last = []
 beta_last = []
 pi_last = []
@@ -301,6 +310,7 @@ S_final = np.zeros(numSims)
 E_final = np.zeros(numSims)
 I_final = np.zeros(numSims)
 P_final = np.zeros(numSims)
+Q_final = np.zeros(numSims)
 R_final = np.zeros(numSims)
 beta_final = np.zeros(numSims)
 pi_final = np.zeros(numSims)
@@ -323,14 +333,16 @@ def run_one_sim(j):
     I0 = I0_init
     E0 = E0_init
     P0 = P0_init
+    Q0 = Q0_init
     R0 = R0_init
-    S_burn, E_burn, I_burn, P_burn, R_burn = S0, E0, I0, P0, R0
+    S_burn, E_burn, I_burn, P_burn, Q_burn, R_burn = S0, E0, I0, P0, Q0, R0
 
     # noise intensity
     sigma_S = rng.triangular(0, 0.02, 0.25)                                    
     sigma_I = rng.triangular(0, 0.02, 0.25)      
     sigma_E = rng.triangular(0, 0.02, 0.25)      
-    sigma_P = rng.triangular(0, 0.02, 0.25)      
+    sigma_P = rng.triangular(0, 0.02, 0.25) 
+    sigma_Q = rng.triangular(0, 0.02, 0.25)       
     sigma_R = rng.triangular(0, 0.02, 0.25)  
 
     
@@ -362,15 +374,20 @@ def run_one_sim(j):
     dW_P      = rng.normal(0.0, sigma_P * sqrt_dt, size=len(t))
     dW_P[:nramp_1] = 0.0
 
+    dW_Q      = rng.normal(0.0, sigma_Q * sqrt_dt, size=len(t))
+    dW_Q[:nramp_1] = 0.0
+
     dW_R_burn = rng.normal(0.0, sigma_R * sqrt_dt, size=int(tburn / dt))
     dW_R      = rng.normal(0.0, sigma_R * sqrt_dt, size=len(t))
+
     # ---------- burn-in ----------
     for i in range(len(dW_S_burn)):
-        S_burn += de_fun_S(S_burn, I_burn, P_burn, Lambda, beta[0], pi[0], phi[0], mu) * dt + dW_S_burn[i]
-        E_burn += de_fun_E(S_burn, E_burn, I_burn, P_burn, beta[0], theta, epsilon, mu) * dt + dW_E_burn[i]
-        I_burn += de_fun_I(E_burn, I_burn, theta, gamma, mu) * dt + dW_I_burn[i]
+        S_burn += de_fun_S(S_burn, I_burn, P_burn, 0, Lambda, beta[0], pi[0], phi[0], 1, mu) * dt + dW_S_burn[i]
+        E_burn += de_fun_E(S_burn, E_burn, I_burn, P_burn, 0, beta[0], theta, epsilon, 1, mu) * dt + dW_E_burn[i]
+        I_burn += de_fun_I(E_burn, I_burn, theta, gamma, 0, mu) * dt + dW_I_burn[i]
         P_burn = 0.0
-        R_burn += de_fun_R(I_burn, R_burn, gamma, mu) * dt + dW_R_burn[i]
+        Q_burn = 0.0
+        R_burn += de_fun_R(I_burn, R_burn, Q_burn, gamma, tau, mu) * dt + dW_R_burn[i]
 
         if S_burn < 0: S_burn = 0.0
         if E_burn < 0: E_burn = 0.0
@@ -383,34 +400,43 @@ def run_one_sim(j):
     # ---------- allocate state ----------
     I = np.empty(len(t))
 
-    S, E, I[0], P, R = S_burn, E_burn, I_burn, P_burn, R_burn
+    S, E, I[0], P, Q, R = S_burn, E_burn, I_burn, P_burn, Q_burn, R_burn
 
     # ---------- main simulation ----------
     for i in range(len(t) - 1):
-        S_new = S + de_fun_S(S, I[i], P, Lambda, beta[i], pi[i], phi[i], mu) * dt + dW_S[i]
-        E_new = E + de_fun_E(S, E, I[i], P, beta[i], theta, epsilon, mu) * dt + dW_E[i]
-        I[i+1] = I[i] + de_fun_I(E, I[i], theta, gamma, mu) * dt + dW_I[i]
+        if i < nramp_1:
+            S_new = S + de_fun_S(S, I[i], P, 0,Lambda, beta[i], pi[i], phi[i], 1, mu) * dt + dW_S[i]
+            E_new = E + de_fun_E(S, E, I[i], P, 0,beta[i], theta, epsilon, 1,mu) * dt + dW_E[i]
+            I[i+1] = I[i] + de_fun_I(E, I[i], theta, gamma, 0.0, mu)*dt + dW_I[i]
+        else:
+            S_new = S + de_fun_S(S, I[i], P, Q,Lambda, beta[i], pi[i], phi[i],epsilon_q,mu) * dt + dW_S[i]
+            E_new = E + de_fun_E(S, E, I[i], P, Q, beta[i], theta, epsilon, epsilon_q,mu) * dt + dW_E[i]
+            I[i+1] = I[i] + de_fun_I(E, I[i], theta, gamma, delta, mu) * dt + dW_I[i]
 
         if i < nramp_1:
             P_new = 0.0
+            Q_new = 0.0
         else:
             P_new = P + de_fun_P(S, I[i], P, beta[i], pi[i], phi[i], epsilon, mu) * dt + dW_P[i]
+            Q_new = Q + de_fun_Q(Q, I[i], delta, mu, tau) * dt + dW_Q[i]
 
-        R_new = R + de_fun_R(I[i], R, gamma, mu) * dt
+        R_new = R + de_fun_R(I[i], R, Q, gamma, tau, mu) * dt
 
         if S_new < 0: S_new = 0.0
         if E_new < 0: E_new = rng.uniform(0,0.5)
         if I[i+1] < 0: I[i+1] = rng.uniform(0,0.5)
         if P_new < 0: P_new = rng.uniform(0,0.5)
+        if Q_new < 0: Q_new = rng.uniform(0,0.5)
+
         if R_new < 0: R_new = 0.0
 
         Ro[i+1] = beta[i] * theta * ( Lambda / mu ) * (mu + phi[i] + (1-epsilon) * pi[i])/((mu+gamma)*(mu+theta)*(mu + phi[i] + pi[i]))
 
 
-        S, E, P, R = S_new, E_new, P_new, R_new
+        S, E, P,Q, R = S_new, E_new, P_new, Q_new, R_new
    
     return (
-        S, E, I[-1], P, R,
+        S, E, I[-1], P, Q, R,
         beta[-1], pi[-1], phi[-1]
     )
 
@@ -425,6 +451,7 @@ results = Parallel(n_jobs=NUM_THREADS, prefer="processes")(
     E_last,
     I_last,
     P_last,
+    Q_last,
     R_last,
     beta_last,
     pi_last,
@@ -435,6 +462,7 @@ S_last = np.array(S_last)
 E_last = np.array(E_last)
 I_last = np.array(I_last)
 P_last = np.array(P_last)
+Q_last = np.array(Q_last)
 R_last = np.array(R_last)
 beta_last = np.array(beta_last)
 pi_last = np.array(pi_last)
@@ -487,10 +515,14 @@ t_suppress = t_2[:n_suppress]  # First n_suppress points
 t_ramp_b2 = t_2[n_suppress:] - tsuppress_beta_2  # Elapsed time post-suppression (starts at 0)
 
 # critical beta array
-betabif_2 = (
-    mu  * (mu + theta)  * (mu + gamma) * (mu + param_phi_final + 0.2 * pi_last_arr)
-    / (theta * (mu + param_phi_final + (1 - epsilon) * 0.2 * pi_last_arr) * Lambda)
-)
+
+betabif_2_numerator = mu  * (mu + theta)  * (mu + gamma + delta) * (mu + param_phi_final + 0.2 * pi_last_arr)*(mu+tau)
+betabif_2_denominator = theta*Lambda*((mu + param_phi_final)*(mu+tau)+delta*(1-epsilon_q)*(mu+param_phi_final) + (1 - epsilon)*0.2*pi_last_arr*(mu+tau))
+
+betabif_2 = betabif_2_numerator/betabif_2_denominator
+    
+    
+
 
 # reduce beta from end of phase 1 before ramping it up again
 depressed_beta_2 = (1.0 - beta_suppression) * beta_last
@@ -532,6 +564,7 @@ def run_phase2_sim(j):
     S = S_last[j]
     E = E_last[j]
     P = P_last[j]
+    Q = Q_last[j]
     R = R_last[j]
     I[0] = I_last[j]
     pi0_2  = pi_last[j]
@@ -557,32 +590,36 @@ def run_phase2_sim(j):
         sigma_S = rng.triangular(0, 0.006, 0.012)                                    
         sigma_I = rng.triangular(0, 0.006, 0.012)     
         sigma_E = rng.triangular(0, 0.006, 0.012)    
-        sigma_P = rng.triangular(0, 0.006, 0.012) 
+        sigma_P = rng.triangular(0, 0.006, 0.012)
+        sigma_Q = rng.triangular(0, 0.006, 0.012) 
         sigma_R = rng.triangular(0, 0.006, 0.012) 
     else:
         sigma_S = rng.triangular(0, 0.003, 0.006)                               
         sigma_I = rng.triangular(0, 0.003, 0.006)      
         sigma_E = rng.triangular(0, 0.003, 0.006)       
-        sigma_P = rng.triangular(0, 0.003, 0.006)         
+        sigma_P = rng.triangular(0, 0.003, 0.006)
+        sigma_Q = rng.triangular(0, 0.003, 0.006)         
         sigma_R = rng.triangular(0, 0.003, 0.006)
     
     # calculate initial value of Reff before entering simulation
     Reff[0] = beta[0]*theta*(S + (1-epsilon)*P) /((mu+gamma)*(mu+theta))
-    Ro[0] = beta[0] * theta * ( Lambda / mu ) * (mu + phi[0] + (1-epsilon) * pi[0])/((mu+gamma)*(mu+theta)*(mu + phi[0] + pi[0]))
+    Ro[0] = beta[0] * theta * ( Lambda / mu ) * (mu + phi[0] + (1-epsilon) * pi[0] + (1-epsilon_q)*delta*(mu+phi[0])/(mu+tau))/((mu+gamma+delta)*(mu+theta)*(mu + phi[0] + pi[0]))
 
     dW_S = rng.normal(loc=0, scale=sigma_S*np.sqrt(dt), size = len(t_2))
     dW_E = rng.normal(loc=0, scale=sigma_E*np.sqrt(dt), size = len(t_2))
     dW_I = rng.normal(loc=0, scale=sigma_I*np.sqrt(dt), size = len(t_2))
     dW_P = rng.normal(loc=0, scale=sigma_P*np.sqrt(dt), size = len(t_2))
+    dW_Q = rng.normal(loc=0, scale=sigma_Q*np.sqrt(dt), size = len(t_2))
     dW_R = rng.normal(loc=0, scale=sigma_R*np.sqrt(dt), size = len(t_2))
 
 # ================ Run simulation ===================
     for i in range(len(t_2)-1):
-        S_new= S + de_fun_S(S,I[i],P,Lambda,beta[i],pi[i],phi[i],mu)*dt + dW_S[i]
-        E_new = E + de_fun_E(S,E,I[i],P,beta[i],theta,epsilon,mu)*dt + dW_E[i]
-        I[i+1] = I[i] + de_fun_I(E,I[i],theta,gamma,mu)*dt + dW_I[i]
+        S_new= S + de_fun_S(S,I[i],P,Q,Lambda,beta[i],pi[i],phi[i],epsilon_q,mu)*dt + dW_S[i]
+        E_new = E + de_fun_E(S,E,I[i],P,Q,beta[i],theta,epsilon,epsilon_q,mu)*dt + dW_E[i]
+        I[i+1] = I[i] + de_fun_I(E,I[i],theta,gamma,delta,mu)*dt + dW_I[i]
         P_new = P + de_fun_P(S,I[i],P,beta[i],pi[i],phi[i],epsilon,mu)*dt + dW_P[i]
-        R_new = R + de_fun_R(I[i],R,gamma,mu)*dt
+        Q_new = Q + de_fun_Q(Q,I[i],delta,mu,tau)*dt + dW_Q[i]
+        R_new = R + de_fun_R(I[i],R,Q,gamma,tau,mu)*dt
         
         # make sure that state variable remains >= 0
         if S_new < 0:                                                                  
@@ -593,13 +630,15 @@ def run_phase2_sim(j):
             I[i+1] = rng.uniform(0.1,0.2)
         if P_new < 0:
             P_new = rng.uniform(0.1,0.5)
+        if Q_new < 0:
+            Q_new = rng.uniform(0.1,0.5)
         if R_new < 0:
             R_new = rng.uniform(0.1,0.5)
 
         # calculate Reff for each step
         Reff[i+1] = beta[i]*theta*(S_new + (1-epsilon)*P_new) /((mu+gamma)*(mu+theta))
-        Ro[i+1] = beta[i] * theta * ( Lambda / mu ) * (mu + phi[i] + (1-epsilon) * pi[i])/((mu+gamma)*(mu+theta)*(mu + phi[i] + pi[i]))
-        S, E, P, R = S_new, E_new, P_new, R_new
+        Ro[i+1] = beta[i] * theta * ( Lambda / mu ) * (mu + phi[i] + (1-epsilon) * pi[i] + (1-epsilon_q)*delta*(mu+phi[i])/(mu+tau))/((mu+gamma+delta)*(mu+theta)*(mu + phi[i] + pi[i]))
+        S, E, P, Q, R = S_new, E_new, P_new, Q_new, R_new
 
     if np.any(Ro > 1.0):
         idx = np.where(Ro > 1.0)[0][0]
@@ -736,7 +775,7 @@ label.to_csv(filepath,
             header=False, index=False) 
 
 null_label = pd.DataFrame({
-    "sequence_ID": np.arange(null_offset + 1, null_offset + 1 + numSims),
+    "sequence_ID": np.arange(null_offset + 1+ sim_index, null_offset + 1 + sim_index + numSims),
     "class_value": np.zeros(numSims, dtype=int)
 })
 null_label.to_csv(
