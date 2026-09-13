@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
 """
 Organise ML data output of empirical datasets by Chakraborty et al's model into a single dataframe. 
 Edited from published codes by Bury et al. (2021), 
@@ -22,8 +16,6 @@ import numpy as np
 import pandas as pd
 import os
 
-
-
 # length of classifier
 classifier_length=100
 pad_samples = 10
@@ -31,8 +23,8 @@ pad_samples = 10
 ml_spacing = int(classifier_length/pad_samples)
 
 #Change your test model
-#datasets are: 'flu', 'COVID', 'mpox', 'COVID_county'
-dataset = 'COVID_county'
+#datasets are: 'mpox', 'COVID', 'mpox', COVID_state, 'SEIPR_MultNoise', 'SEIPR_AddNoise', 'SIR_AddNoise', 'SIR_MultNoise'
+dataset = 'COVID_state'
 model = 'GEN-DL'      # 'GEN-DL', 'Chakraborty'
 
 # Import EWS data for variable I (required for time values of original data)
@@ -102,9 +94,6 @@ df_ml.sort_values(['tsid','Time'],inplace=True)
 
 # Export ML dataframe
 df_ml.to_csv('{}/data/ml_pred_{}/df_ml_forced.csv'.format(dataset, model), index=False)
-
-
-
 
 #----------------
 # Organize data for null trajectories
