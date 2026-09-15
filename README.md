@@ -26,9 +26,9 @@ PROCESS FOR GENERATING CONSOLIDATED AUC CHART
 1. Navigate to codes/trained_dl_models_and_testing/testing_codes
 2. Run /Users/maya/Research/Publishing_quarantine/codes/trained_dl_models_and_testing/testing_codes/AUC_consolidated_plots.py
 
-6. You can skip Step 2 and run just steps 3 and 4 as the folder already contains outputs from Step 2.
+6. Step 2 can be skipped and steps 3 and 4 can be run directly as the folder already contains outputs from Step 2.
 
 All Bury and Chakraborty results from Chakraborty et al. (2025) Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model
 https://zenodo.org/records/15377482
 
-SIDATR results for COVID_county calculated by Maya Rangarajan using testing pipeline
+SIDATR results for COVID_state calculated by Maya Rangarajan using testing pipeline
