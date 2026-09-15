@@ -1,0 +1,16 @@
+epyestim==0.1
+ewstools==2.1.2
+joblib==1.5.3
+keras_tuner==1.4.8
+matplotlib==3.11.2
+numpy==2.5.3
+pandas==3.0.5
+plotly==7.0.0
+scikit_learn==1.9.1
+scipy==1.18.1
+seaborn==0.13.2
+statsmodels==0.14.6
+tensorflow==2.21.0
+tf_keras==2.21.0
+tqdm==4.68.1
+urllib3==2.7.0
