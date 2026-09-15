@@ -17,11 +17,16 @@ Codes
 
 PROCESS FOR TESTING
 1. Step 1: Navigate to codes/trained_dl_models_and_testing folder
-2. Step 2: run run_data_set_prediction.py for each disease dataset (mpox, flu, COVID, COVID_county)
-3. Step 3: run organize_ml_predictions.py for each disease dataset
-4. Step 4: run plot_empirical.py for each disease dataset
+2. Step 2: Move the appropriate GEN-DL .keras model from codes/quarantine_models to codes/trained_dl_models_and_testing/trained_GEN-DL_models. In this step you are selecting the appropriate training regime (fast, base, COVID, mpox, flu)
+3. Step 3: run run_data_set_prediction.py for each disease dataset (mpox, flu, COVID, COVID_state)
+4. Step 4: run organize_ml_predictions.py for each disease dataset
+5. Step 5: run plot_empirical.py for each disease dataset
 
-5. You can skip Step 2 and run just steps 3 and 4 as the folder already contains outputs from Step 2.
+PROCESS FOR GENERATING CONSOLIDATED AUC CHART
+1. Navigate to codes/trained_dl_models_and_testing/testing_codes
+2. Run /Users/maya/Research/Publishing_quarantine/codes/trained_dl_models_and_testing/testing_codes/AUC_consolidated_plots.py
+
+6. You can skip Step 2 and run just steps 3 and 4 as the folder already contains outputs from Step 2.
 
 All Bury and Chakraborty results from Chakraborty et al. (2025) Codes: Deep Learning for Disease Outbreak Prediction: A parallel LSTM-CNN model
 https://zenodo.org/records/15377482
