@@ -1,0 +1,407 @@
+"""
+Spectral comparison: away from vs. approaching the transition
+
+For each forced (transcritical) residual series, compares the power spectrum of
+two equal-length windows cut from the SAME residual series:
+
+    away        : [n - 2L - G, n - L - G)  -> ends L + G days before the transition
+    approaching : [n - L,  n)              -> final L days before the transition
+
+G (GAP_DAYS) moves the away window earlier. G = 0 makes the windows adjacent.
+
+Because both windows come from the same residual
+series, they share one detrending and have identical length, so differences
+between them are not caused by detrending span or series length.
+
+Maya Rangarajan
+"""
+
+import warnings
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import signal
+from scipy.stats import wilcoxon, binomtest
+
+warnings.filterwarnings("ignore")
+
+
+# ==================== CONFIGURATION ====================
+class Config:
+    BASE_PATH = Path(".")
+
+    # Folder name -> display label. Folders are BASE_PATH/<name>/data/resids
+    DISEASES = {
+        "COVID": "COVID Edmonton",
+        "COVID_state": "COVID U.S.",
+        "Flu": "Influenza",
+        "mpox": "mpox",
+    }
+
+    WINDOW_DAYS = 21            # L: length of each window (days)
+    AWAY_AT_START = True        # True: away = first L days of the series
+    GAP_DAYS = 0                # used only if AWAY_AT_START is False:
+                                # away = [n-2L-G, n-L-G), G = 0 -> adjacent windows
+    SAMPLING_RATE = 1.0         # daily data
+
+    LOW_FREQ_THRESHOLD = 0.1    # cycles/day (periods > 10 days)
+    HIGH_FREQ_THRESHOLD = 0.3   # cycles/day (periods < 3.3 days)
+
+    MAX_PAIR_LINES = 150        # max paired lines drawn per panel (readability)
+    RANDOM_SEED = 42
+
+    OUTPUT_DIR = Path("./../../output_charts/spectral_window_comparison")
+    FIGURE_DPI = 300
+
+    DISEASE_COLORS = {"COVID Edmonton": "#D32F2F", "Mpox": "#1976D2",
+                      "Influenza": "#388E3C", "COVID U.S.": "#455A64"}
+
+    COLORS = {"away": "#9E9E9E", "approaching": "#D32F2F",
+              "low": "#1976D2", "mid": "#7B1FA2", "high": "#388E3C"}
+
+
+# ==================== DATA LOADING ====================
+def load_residuals_from_csv(filepath):
+    try:
+        df = pd.read_csv(filepath)
+        for col in ["residuals", "Residuals", "resid", "value", "values"]:
+            if col in df.columns:
+                x = df[col].values.astype(float)
+                x = x[np.isfinite(x)]
+                return x if len(x) > 0 else None
+    except Exception as e:
+        print(f"  Error loading {filepath.name}: {e}")
+    return None
+
+
+def load_forced_residuals(folder):
+    """Load all forced (transcritical) residual series for one disease."""
+    path = Config.BASE_PATH / folder / "data" / "resids"
+    if not path.exists():
+        print(f"  Warning: {path} not found")
+        return []
+    files = sorted(f for f in path.glob("resids*.csv") if "forced" in f.name.lower())
+    out = []
+    for f in files:
+        x = load_residuals_from_csv(f)
+        if x is not None:
+            out.append((f.name, x))
+    print(f"  {folder}: loaded {len(out)} forced series")
+    return out
+
+
+# ==================== SPECTRAL FEATURES ====================
+def band_powers(x):
+    """
+    Absolute and fractional power in low/mid/high bands for one window.
+    Single Welch segment = whole window (Hann taper, mean removed).
+
+    """
+    freqs, psd = signal.welch(x, fs=Config.SAMPLING_RATE, nperseg=len(x),
+                              window="hann", detrend="constant",
+                              scaling="density")
+    df = freqs[1] - freqs[0]
+    pos = freqs > 0
+    low_m = pos & (freqs < Config.LOW_FREQ_THRESHOLD)
+    mid_m = (freqs >= Config.LOW_FREQ_THRESHOLD) & (freqs < Config.HIGH_FREQ_THRESHOLD)
+    high_m = freqs >= Config.HIGH_FREQ_THRESHOLD
+
+    low, mid, high = (psd[m].sum() * df for m in (low_m, mid_m, high_m))
+    total = low + mid + high
+    if total <= 0:
+        return None
+    return {"low": low, "mid": mid, "high": high,
+            "log10_ratio": np.log10(low / high) if low > 0 and high > 0 else np.nan,
+            "low_frac": low / total, "mid_frac": mid / total,
+            "high_frac": high / total}
+
+
+def analyze_disease(folder, label):
+    """Per-series band powers for the away and approaching windows."""
+    L, G = Config.WINDOW_DAYS, Config.GAP_DAYS
+    need = 2 * L if Config.AWAY_AT_START else 2 * L + G
+    rows, skipped = [], 0
+    for fname, x in load_forced_residuals(folder):
+        n = len(x)
+        if n < need:
+            skipped += 1
+            continue
+        away_x = x[:L] if Config.AWAY_AT_START else x[n - need:n - L - G]
+        away = band_powers(away_x)
+        appr = band_powers(x[n - L:])
+        if away is None or appr is None:
+            skipped += 1
+            continue
+        row = {"disease": label, "file": fname, "length": n}
+        row.update({f"away_{k}": v for k, v in away.items()})
+        row.update({f"appr_{k}": v for k, v in appr.items()})
+        rows.append(row)
+    if skipped:
+        print(f"  {folder}: skipped {skipped} series (shorter than {need} days or zero power)")
+    return pd.DataFrame(rows)
+
+
+# ==================== STATISTICS ====================
+def safe_wilcoxon(a, b):
+    try:
+        return wilcoxon(a, b).pvalue if len(a) >= 5 else np.nan
+    except ValueError:
+        return np.nan
+
+
+def sign_test(diff):
+    """
+    Share of series with an increase, two-sided sign-test p,
+    95% CI.
+    """
+    diff = np.asarray(diff)
+    diff = diff[np.isfinite(diff) & (diff != 0)]
+    if len(diff) == 0:
+        return np.nan, np.nan, np.nan, np.nan
+    k = int((diff > 0).sum())
+    res = binomtest(k, len(diff), 0.5)
+    ci = res.proportion_ci(confidence_level=0.95, method="exact")
+    return 100 * k / len(diff), res.pvalue, 100 * ci.low, 100 * ci.high
+
+
+def summarize(df):
+    """Per-disease summary: low-frequency fraction change and band log-ratios."""
+    out = []
+    for disease, d in df.groupby("disease", sort=False):
+        rec = {"disease": disease, "n_series": len(d)}
+
+        # Low-frequency fraction (normalized; sums to 1 with mid and high)
+        pct = 100 * (d["appr_low_frac"] - d["away_low_frac"]) / d["away_low_frac"]
+        rec["low_frac_away_median"] = d["away_low_frac"].median()
+        rec["low_frac_appr_median"] = d["appr_low_frac"].median()
+        rec["low_frac_mean_shift"] = d["appr_low_frac"].mean() - d["away_low_frac"].mean()
+        rec["low_frac_pct_change_of_means"] = 100 * rec["low_frac_mean_shift"] / d["away_low_frac"].mean()
+        rec["low_frac_pct_change_mean"] = pct.mean()
+        rec["low_frac_pct_change_median"] = pct.median()
+        rec["low_frac_wilcoxon_p"] = safe_wilcoxon(d["appr_low_frac"], d["away_low_frac"])
+
+        # Low/high spectral ratio (identical for absolute or normalized power)
+        r_away, r_appr = d["away_log10_ratio"], d["appr_log10_ratio"]
+        ok = np.isfinite(r_away) & np.isfinite(r_appr)
+        rec["log10_ratio_away_mean"] = r_away[ok].mean()
+        rec["log10_ratio_appr_mean"] = r_appr[ok].mean()
+        rec["log10_ratio_change_mean"] = (r_appr[ok] - r_away[ok]).mean()
+        rec["log10_ratio_wilcoxon_p"] = safe_wilcoxon(r_appr[ok], r_away[ok])
+        diff = r_appr[ok] - r_away[ok]
+        rec["log10_ratio_change_median"] = diff.median()
+        (rec["ratio_pct_increased"], rec["ratio_sign_test_p"],
+         rec["ratio_pct_ci_low"], rec["ratio_pct_ci_high"]) = sign_test(diff)
+
+        # Absolute power per band
+        for band in ("low", "mid", "high"):
+            lr = np.log2(d[f"appr_{band}"] / d[f"away_{band}"])
+            rec[f"{band}_log2ratio_median"] = lr.median()
+            rec[f"{band}_wilcoxon_p"] = safe_wilcoxon(d[f"appr_{band}"], d[f"away_{band}"])
+        out.append(rec)
+    return pd.DataFrame(out)
+
+
+def fmt_p_short(p):
+    if not np.isfinite(p):
+        return "n/a"
+    return "p<.001" if p < 0.001 else f"p={p:.3f}".replace("0.", ".", 1)
+
+
+def fmt_p(p):
+    if not np.isfinite(p):
+        return "p = n/a"
+    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
+
+
+# ==================== FIGURE ====================
+def make_supplement_figure(df, summary):
+    """
+    Full PNAS text width (figure*)
+    """
+    diseases = list(summary["disease"])
+    nd = len(diseases)
+    FS = {"disease": 24, "stat": 16, "label": 19, "tick": 17, "p": 15}
+    BG = "#E8E8F0"
+
+    fig, axes = plt.subplots(2, nd, figsize=(4.5 * nd, 11), squeeze=False,
+                             gridspec_kw=dict(left=0.075, right=0.99, top=0.84,
+                                              bottom=0.06, wspace=0.32, hspace=0.42))
+    rng = np.random.default_rng(Config.RANDOM_SEED)
+
+    for j, disease in enumerate(diseases):
+        d = df[df["disease"] == disease]
+        s = summary[summary["disease"] == disease].iloc[0]
+        color = Config.DISEASE_COLORS.get(disease, "0.4")
+
+        # ---- Row 1: log10 spectral ratio (low / high), paired ----
+        ax = axes[0, j]
+        ok = np.isfinite(d["away_log10_ratio"]) & np.isfinite(d["appr_log10_ratio"])
+        a = d.loc[ok, "away_log10_ratio"].values
+        b = d.loc[ok, "appr_log10_ratio"].values
+        idx = np.arange(len(a))
+        if len(idx) > Config.MAX_PAIR_LINES:
+            idx = rng.choice(idx, Config.MAX_PAIR_LINES, replace=False)
+        for i in idx:
+            ax.plot([0, 1], [a[i], b[i]], "-o", color=color, alpha=0.45,
+                    lw=1.3, ms=5, zorder=2)
+        med = np.array([np.median(a), np.median(b)])
+        q1 = np.array([np.percentile(a, 25), np.percentile(b, 25)])
+        q3 = np.array([np.percentile(a, 75), np.percentile(b, 75)])
+        ax.errorbar([0, 1], med, yerr=[med - q1, q3 - med],
+                    color="black", lw=3, marker="o", ms=10, capsize=8,
+                    capthick=2.5, zorder=4)
+        ax.axhline(0, color="black", ls="--", lw=1.2, zorder=1)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Away", "Approaching"])
+        ax.set_xlim(-0.45, 1.45)
+
+        # Disease name prominent; statistic line above it
+        ax.set_title(disease, loc="left", fontsize=FS["disease"],
+                     fontweight="bold", pad=10)
+        change = s["log10_ratio_change_median"]
+        ax.text(0.0, 1.13,
+                f"N = {len(a)},  {s['ratio_pct_increased']:.0f}% increased "
+                f"({fmt_p_short(s['ratio_sign_test_p'])})\n"
+                f"Median shift: {change:+.2f} (×{10 ** change:.2f})",
+                transform=ax.transAxes, ha="left", va="bottom",
+                fontsize=FS["stat"], linespacing=1.4)
+        if j == 0:
+            ax.set_ylabel("log$_{10}$(low / high power)", fontsize=FS["label"])
+
+        # ---- Row 2: log2 ratio of absolute power per band ----
+        ax = axes[1, j]
+        bands = ["low", "mid", "high"]
+        data = [np.log2(d[f"appr_{bnd}"] / d[f"away_{bnd}"]).values for bnd in bands]
+        data = [v[np.isfinite(v)] for v in data]
+        bp = ax.boxplot(data, positions=[0, 1, 2], widths=0.55, patch_artist=True,
+                        showfliers=False, medianprops=dict(color="black", lw=2.5),
+                        boxprops=dict(lw=1.5), whiskerprops=dict(lw=1.5),
+                        capprops=dict(lw=1.5))
+        for patch, bnd in zip(bp["boxes"], bands):
+            patch.set_facecolor(Config.COLORS[bnd])
+            patch.set_alpha(0.75)
+        ax.axhline(0, color="black", ls="--", lw=1.2)
+        ax.set_xticks([0, 1, 2])
+        ax.set_xticklabels(["Low", "Mid", "High"])
+        lo = min(np.percentile(v, 5) for v in data if len(v))
+        hi = max(np.percentile(v, 95) for v in data if len(v))
+        span = max(hi - lo, 1.0)
+        top = max(hi, 0) + 0.35 * span
+        ax.set_ylim(min(lo, 0) - 0.15 * span, top)
+        for k, bnd in enumerate(bands):
+            ax.text(k, top - 0.04 * span, fmt_p_short(s[f"{bnd}_wilcoxon_p"]),
+                    ha="center", va="top", fontsize=FS["p"])
+        if j == 0:
+            ax.set_ylabel("log$_2$(approaching / away)\nband power", fontsize=FS["label"])
+
+    for ax in axes.flat:
+        ax.set_facecolor(BG)
+        ax.grid(True, color="white", lw=1.2)
+        ax.set_axisbelow(True)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(axis="both", labelsize=FS["tick"], length=0)
+
+    return fig
+
+
+def make_main_figure(df, summary):
+    """
+    Main-text figure (PNAS single column)
+    """
+    diseases = list(summary["disease"])
+    FS = {"tick": 18, "label": 18, "ytick": 16, "pct": 18, "ci": 15, "n": 13}
+    BG = "#E8E8F0"
+    rng = np.random.default_rng(Config.RANDOM_SEED)
+
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+    all_vals = []
+    for k, disease in enumerate(diseases):
+        d = df[df["disease"] == disease]
+        diff = (d["appr_log10_ratio"] - d["away_log10_ratio"]).values
+        diff = diff[np.isfinite(diff)]
+        all_vals.append(diff)
+        color = Config.DISEASE_COLORS.get(disease, "0.4")
+
+        # One point per outbreak (horizontal jitter only)
+        jitter = rng.uniform(-0.28, 0.28, len(diff))
+        ax.scatter(k + jitter, diff, s=48, color=color, alpha=0.6,
+                   edgecolors="white", linewidths=0.5, zorder=2)
+
+
+    ax.axhline(0, color="black", ls="--", lw=1.3, zorder=1)
+
+    # Y-range with headroom for the annotations
+    lo = min(v.min() for v in all_vals if len(v))
+    hi = max(v.max() for v in all_vals if len(v))
+    span = max(hi - lo, 0.5)
+    top = hi + 0.45 * span
+    ax.set_ylim(lo - 0.05 * span, top)
+
+    for k, disease in enumerate(diseases):
+        srow = summary[summary["disease"] == disease].iloc[0]
+        sub = df[df["disease"] == disease]
+        n = int(np.isfinite(sub["appr_log10_ratio"] - sub["away_log10_ratio"]).sum())
+        y0 = top - 0.03 * span
+        lines = [
+            (f"+{srow['ratio_pct_increased']:.0f}% increased", FS["pct"], "bold", "black"),
+            (f"CI: {srow['ratio_pct_ci_low']:.0f}–{srow['ratio_pct_ci_high']:.0f}%",
+             FS["ci"], "normal", "black"),
+            (f"Median shift: {srow['log10_ratio_change_median']:+.2f}".replace("-", "−"),
+             FS["ci"], "normal", "black"),
+            (f"n = {n}", FS["n"], "normal", "0.4"),
+        ]
+        offsets = [0.0, 0.085, 0.155, 0.225]
+        for (txt, fs, fw, col), off in zip(lines, offsets):
+            ax.text(k, y0 - off * span, txt, ha="center", va="top",
+                    fontsize=fs, fontweight=fw, color=col)
+
+    ax.set_xticks(range(len(diseases)))
+    ax.set_xticklabels(diseases, fontsize=FS["tick"], fontweight="bold")
+    ax.set_xlim(-0.55, len(diseases) - 0.45)
+    L = Config.WINDOW_DAYS
+    away_desc = (f"first {L} d" if Config.AWAY_AT_START
+                 else f"{2 * L + Config.GAP_DAYS}–{L + Config.GAP_DAYS} d before")
+    ax.set_ylabel(f"Δ log$_{{10}}$(low / high power)\n(last {L} d − {away_desc})",
+                  fontsize=FS["label"])
+    ax.tick_params(axis="y", labelsize=FS["ytick"], length=0)
+    ax.tick_params(axis="x", length=0)
+    ax.set_facecolor(BG)
+    ax.grid(True, axis="y", color="white", lw=1.2)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+# ==================== MAIN ====================
+def main():
+    Config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Loading forced residual series...")
+    frames = [analyze_disease(folder, label) for folder, label in Config.DISEASES.items()]
+    frames = [f for f in frames if len(f) > 0]
+    if not frames:
+        print("No data loaded. Check BASE_PATH and folder names in Config.")
+        return
+    df = pd.concat(frames, ignore_index=True)
+    summary = summarize(df)
+
+    df.to_csv(Config.OUTPUT_DIR / "window_band_powers.csv", index=False)
+    summary.to_csv(Config.OUTPUT_DIR / "window_summary.csv", index=False)
+    print("\n" + summary.round(4).to_string(index=False))
+
+    for maker, name in [(make_main_figure, "spectral_ratio_change"),
+                        (make_supplement_figure, "spectral_away_vs_approaching_SI")]:
+        fig = maker(df, summary)
+        for ext in ("png", "pdf"):
+            path = Config.OUTPUT_DIR / f"{name}.{ext}"
+            fig.savefig(path, dpi=Config.FIGURE_DPI, bbox_inches="tight")
+            print(f"Saved: {path}")
+        plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()
